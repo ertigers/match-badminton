@@ -140,6 +140,7 @@ const getLevelScore = (userId) => {
   return Number.isFinite(level) ? level : 0
 }
 const getPairStrength = (edge) => getLevelScore(edge?.male) + getLevelScore(edge?.female)
+const MAX_PAIR_STRENGTH_GAP = 1
 const getMatchBalanceScore = (edgeA, edgeB) => {
   const pairDiff = Math.abs(getPairStrength(edgeA) - getPairStrength(edgeB))
   const maleDiff = Math.abs(getLevelScore(edgeA?.male) - getLevelScore(edgeB?.male))
@@ -318,7 +319,7 @@ const shuffle = (list = []) => {
   return next
 }
 
-const buildMatchesByEdges = (edgeList = []) => {
+const buildMatchesByEdges = (edgeList = [], maxPairStrengthGap = MAX_PAIR_STRENGTH_GAP) => {
   if (!Array.isArray(edgeList) || !edgeList.length || edgeList.length % 2 !== 0) return null
 
   for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -334,6 +335,8 @@ const buildMatchesByEdges = (edgeList = []) => {
         const candidate = pool[index]
         if (!candidate) continue
         if (candidate.male === first.male || candidate.female === first.female) continue
+        const pairStrengthGap = Math.abs(getPairStrength(first) - getPairStrength(candidate))
+        if (pairStrengthGap > maxPairStrengthGap) continue
         const score = getMatchBalanceScore(first, candidate) + Math.random() * 0.001
         if (score < bestScore) {
           bestScore = score
@@ -356,6 +359,7 @@ const buildMatchesByEdges = (edgeList = []) => {
   return null
 }
 
+// 对局分配核心函数：基于参赛人员、方案和每人局数，生成随机混双分配 rows
 const buildSingleRoundAssignments = () => {
   const validationMessage = getParticipantValidationError(true)
   if (validationMessage) throw new Error(validationMessage)
@@ -414,7 +418,9 @@ const buildSingleRoundAssignments = () => {
 
   let matchList = null
   matchList = buildMatchesByEdges(edges)
-  if (!matchList?.length) throw new Error('赛程生成失败，请重试。')
+  if (!matchList?.length) {
+    throw new Error(`赛程生成失败：无法将每组等级差控制在 ${MAX_PAIR_STRENGTH_GAP} 以内，请调整人数或每人局数后重试。`)
+  }
 
   const rows = []
   let pairNoCursor = 1
@@ -540,9 +546,6 @@ const setLifecycle = async ({ stage, currentRoundNo: roundNo, currentRoundState 
 const onStartRandomMixed = async () => {
   try {
 
-    const rows2 = buildSingleRoundAssignments()
-    console.log(rows2)
-    return
 
     if (!canOperateLifecycle.value) throw new Error('仅管理员或创建者可开始赛事。')
     savingLifecycle.value = true
