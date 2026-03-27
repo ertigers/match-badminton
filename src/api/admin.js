@@ -4,7 +4,7 @@ import { listUserStatsMap } from './user-stats'
 
 const USER_PROFILE_TABLE = '_userprofile'
 const PAGE_SIZE = 1000
-const PROFILE_SELECT_KEYS = ['id', 'nickname', 'gender', 'updated_at']
+const PROFILE_SELECT_KEYS = ['id', 'nickname', 'gender', 'level', 'updated_at']
 const DEFAULT_USER_STATS = {
   level: '-',
   tournament_count: 0,
@@ -59,6 +59,16 @@ const normalizeDraftUsers = (users) => {
       }
     })
 }
+
+const normalizeLevel = (value) => {
+  const text = String(value ?? '').trim()
+  if (!text || text === '-') return ''
+  const number = Number(text)
+  return Number.isFinite(number) ? String(number) : text
+}
+
+const normalizeFinalLevel = (statsLevel, profileLevel) =>
+  normalizeLevel(statsLevel) || normalizeLevel(profileLevel) || '-'
 
 const snapshotSession = () => {
   const snapshot = {
@@ -137,6 +147,7 @@ export const listAllUsers = async () => {
       nickname: item.nickname || '',
       gender,
       gender_text: genderMap[gender],
+      level: normalizeLevel(item.level) || '-',
       updated_at: item.updated_at || '',
     }
   })
@@ -146,10 +157,14 @@ export const listAllUsers = async () => {
     .filter(Boolean)
   const statsMap = await listUserStatsMap(userIds)
 
-  return baseUsers.map((item) => ({
-    ...item,
-    ...(statsMap[item.user_id] || DEFAULT_USER_STATS),
-  }))
+  return baseUsers.map((item) => {
+    const stats = statsMap[item.user_id] || DEFAULT_USER_STATS
+    return {
+      ...item,
+      ...stats,
+      level: normalizeFinalLevel(stats.level, item.level),
+    }
+  })
 }
 
 // 批量导入用户

@@ -30,6 +30,14 @@ const savingParticipants = ref(false)
 const savingLifecycle = ref(false)
 const savingMatchScore = ref(false)
 const refreshingMatchups = ref(false)
+const pageLoading = computed(
+  () =>
+    loading.value ||
+    savingParticipants.value ||
+    savingLifecycle.value ||
+    savingMatchScore.value ||
+    refreshingMatchups.value
+)
 
 const assignmentDraft = ref([])
 const matchupScoreDraft = ref({})
@@ -106,6 +114,18 @@ const femaleCount = computed(() => femaleParticipants.value.length)
 const unknownGenderCount = computed(
   () => enrichedParticipants.value.filter((item) => ![1, 2].includes(Number(item.gender))).length
 )
+const totalParticipantCount = computed(() => maleCount.value + femaleCount.value)
+const FAIR_PLAN_GAMES = {
+  6: [6, 12],
+  8: [4, 8],
+  10: [10],
+  12: [6, 12],
+  16: [8],
+  20: [10],
+}
+const RANDOM_PLAN_TOTAL_SET = new Set([6, 8, 10, 12, 14, 16, 18, 20, 22, 24])
+const planCode = ref('fair')
+const gamesPerPlayer = ref(0)
 
 const isParticipantUser = computed(() => participantUserIdSet.value.has(currentUserId.value))
 const canManageParticipants = computed(() => hasManagerPermission.value)
@@ -114,11 +134,88 @@ const canRecordScore = computed(() => hasManagerPermission.value || isParticipan
 
 const getUserLabel = (userId) =>
   participantOptions.value.find((item) => String(item.value) === String(userId))?.label || String(userId || '-')
+const getLevelScore = (userId) => {
+  const user = userMap.value.get(String(userId || ''))
+  const level = Number(user?.level)
+  return Number.isFinite(level) ? level : 0
+}
+const getPairStrength = (edge) => getLevelScore(edge?.male) + getLevelScore(edge?.female)
+const getMatchBalanceScore = (edgeA, edgeB) => {
+  const pairDiff = Math.abs(getPairStrength(edgeA) - getPairStrength(edgeB))
+  const maleDiff = Math.abs(getLevelScore(edgeA?.male) - getLevelScore(edgeB?.male))
+  const femaleDiff = Math.abs(getLevelScore(edgeA?.female) - getLevelScore(edgeB?.female))
+  return pairDiff * 10 + maleDiff + femaleDiff
+}
 
-const getParticipantValidationError = () => {
+const gcd = (a, b) => {
+  let x = Math.abs(Number(a || 0))
+  let y = Math.abs(Number(b || 0))
+  while (y) {
+    const temp = x % y
+    x = y
+    y = temp
+  }
+  return x || 1
+}
+
+const minGamesPerPlayer = computed(() => {
+  const total = Number(totalParticipantCount.value || 0)
+  if (total <= 4 || total % 2 !== 0) return 0
+  return Math.max(1, 4 / gcd(total, 4))
+})
+
+const expectedMatchCount = computed(() => {
+  const total = Number(totalParticipantCount.value || 0)
+  const games = Number(gamesPerPlayer.value || 0)
+  if (total < 1 || games < 1) return 0
+  return (total * games) / 4
+})
+
+const availablePlans = computed(() => {
+  const total = Number(totalParticipantCount.value || 0)
+  if (!RANDOM_PLAN_TOTAL_SET.has(total)) return []
+  const plans = [{ value: 'random', label: '方案二：随机混搭' }]
+  if (Object.prototype.hasOwnProperty.call(FAIR_PLAN_GAMES, total)) {
+    plans.unshift({ value: 'fair', label: '方案一：公平混搭' })
+  }
+  return plans
+})
+
+const availableGamesPerPlayer = computed(() => {
+  const total = Number(totalParticipantCount.value || 0)
+  if (planCode.value === 'fair') return FAIR_PLAN_GAMES[total] || []
+  if (!RANDOM_PLAN_TOTAL_SET.has(total)) return []
+  if (total % 4 === 0) return [4, 5, 6, 7, 8, 9, 10]
+  return [4, 6, 8, 10]
+})
+
+const syncPlanSelection = () => {
+  const planValues = availablePlans.value.map((item) => item.value)
+  if (!planValues.length) {
+    planCode.value = 'fair'
+    gamesPerPlayer.value = 0
+    return
+  }
+  if (!planValues.includes(planCode.value)) {
+    planCode.value = planValues[0]
+  }
+  const gameOptions = availableGamesPerPlayer.value
+  if (!gameOptions.includes(Number(gamesPerPlayer.value || 0))) {
+    gamesPerPlayer.value = Number(gameOptions[0] || 0)
+  }
+}
+
+const getParticipantValidationError = (strictSelection = false) => {
   if (unknownGenderCount.value > 0) return '存在未标注性别的参赛人员，请先完善为男/女。'
-  if (maleCount.value < 2 || femaleCount.value < 2) return '随机混双至少需要 2 男 2 女。'
+  if (totalParticipantCount.value <= 4) return '参赛总人数必须大于 4。'
+  if (totalParticipantCount.value % 2 !== 0) return '参赛总人数必须是偶数。'
   if (maleCount.value !== femaleCount.value) return '随机混双要求男女人数必须 1:1。'
+  if (maleCount.value < 2 || femaleCount.value < 2) return '随机混双至少需要 2 男 2 女。'
+  if (!availablePlans.value.length) return '当前人数仅支持 6/8/10/12/14/16/18/20/22/24。'
+  if (strictSelection) {
+    if (!availablePlans.value.some((item) => item.value === planCode.value)) return '请先选择赛程方案。'
+    if (!availableGamesPerPlayer.value.includes(Number(gamesPerPlayer.value || 0))) return '请先选择每人局数。'
+  }
   return ''
 }
 
@@ -152,65 +249,29 @@ const pairList = computed(() => {
   }))
 })
 
-const pairNoOf = (maleIndex, femaleIndex, size) => maleIndex * size + femaleIndex + 1
-
-const buildDisjointPairNoMatches = (size) => {
-  const matches = []
-  const coreSize = size % 2 === 0 ? size : size - 1
-
-  for (let maleIndex = 0; maleIndex < coreSize; maleIndex += 2) {
-    for (let femaleIndex = 0; femaleIndex < coreSize; femaleIndex += 2) {
-      const p1 = pairNoOf(maleIndex, femaleIndex, size)
-      const p2 = pairNoOf(maleIndex + 1, femaleIndex + 1, size)
-      const p3 = pairNoOf(maleIndex, femaleIndex + 1, size)
-      const p4 = pairNoOf(maleIndex + 1, femaleIndex, size)
-      matches.push([p1, p2], [p3, p4])
-    }
-  }
-
-  if (size % 2 === 1) {
-    const last = size - 1
-    for (let index = 0; index < size - 1; index += 1) {
-      const pRow = pairNoOf(last, index, size)
-      const pCol = pairNoOf(index, last, size)
-      matches.push([pRow, pCol])
-    }
-  }
-
-  return matches
-}
-
-const byePairs = computed(() => {
-  const size = Number(maleCount.value || 0)
-  if (!pairList.value.length || size < 1 || size % 2 === 0) return []
-  const byePairNo = pairNoOf(size - 1, size - 1, size)
-  return pairList.value.filter((item) => Number(item.pairNo) === byePairNo)
-})
+const byePairs = computed(() => [])
 
 const fullMatchups = computed(() => {
-  const size = Number(maleCount.value || 0)
-  if (!pairList.value.length || size < 1 || femaleCount.value !== size) return []
+  if (!pairList.value.length) return []
 
-  const byPairNo = new Map(pairList.value.map((item) => [Number(item.pairNo), item]))
-  const pairNoMatches = buildDisjointPairNoMatches(size)
   const matches = []
-  pairNoMatches.forEach(([homePairNo, awayPairNo]) => {
-    const home = byPairNo.get(Number(homePairNo))
-    const away = byPairNo.get(Number(awayPairNo))
-    if (!home || !away) return
+  for (let index = 0; index + 1 < pairList.value.length; index += 2) {
+    const home = pairList.value[index]
+    const away = pairList.value[index + 1]
+    if (!home || !away) continue
 
     const homeUsers = new Set([home.mixed_male, home.mixed_female].map((item) => String(item || '')))
     const awayUsers = [away.mixed_male, away.mixed_female].map((item) => String(item || ''))
-    if (awayUsers.some((id) => homeUsers.has(id))) return
+    if (awayUsers.some((id) => homeUsers.has(id))) continue
 
     matches.push({
-      key: `${singleRoundNo}-mixed_double-${homePairNo}-${awayPairNo}`,
-      homeLabel: `组合 ${homePairNo}`,
-      awayLabel: `组合 ${awayPairNo}`,
+      key: `${singleRoundNo}-mixed_double-${home.pairNo}-${away.pairNo}`,
+      homeLabel: `组合 ${home.pairNo}`,
+      awayLabel: `组合 ${away.pairNo}`,
       homeValue: `${home.maleLabel}\n${home.femaleLabel}`,
       awayValue: `${away.maleLabel}\n${away.femaleLabel}`,
     })
-  })
+  }
 
   return [
     {
@@ -257,34 +318,140 @@ const shuffle = (list = []) => {
   return next
 }
 
+const buildMatchesByEdges = (edgeList = []) => {
+  if (!Array.isArray(edgeList) || !edgeList.length || edgeList.length % 2 !== 0) return null
+
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const pool = shuffle(edgeList)
+    const result = []
+
+    while (pool.length) {
+      const first = pool.pop()
+      let bestIndex = -1
+      let bestScore = Number.POSITIVE_INFINITY
+
+      for (let index = 0; index < pool.length; index += 1) {
+        const candidate = pool[index]
+        if (!candidate) continue
+        if (candidate.male === first.male || candidate.female === first.female) continue
+        const score = getMatchBalanceScore(first, candidate) + Math.random() * 0.001
+        if (score < bestScore) {
+          bestScore = score
+          bestIndex = index
+        }
+      }
+
+      if (bestIndex < 0) {
+        result.length = 0
+        break
+      }
+
+      const [second] = pool.splice(bestIndex, 1)
+      result.push({ a: first, b: second })
+    }
+
+    if (result.length * 2 === edgeList.length) return result
+  }
+
+  return null
+}
+
 const buildSingleRoundAssignments = () => {
-  const validationMessage = getParticipantValidationError()
+  const validationMessage = getParticipantValidationError(true)
   if (validationMessage) throw new Error(validationMessage)
 
   const maleIds = shuffle(maleParticipants.value.map((item) => String(item.user_id || '')))
   const femaleIds = shuffle(femaleParticipants.value.map((item) => String(item.user_id || '')))
   const size = maleIds.length
+  const games = Number(gamesPerPlayer.value || 0)
+  const edges = []
+
+  if (planCode.value === 'fair') {
+    const repeat = games / size
+    if (!Number.isInteger(repeat) || repeat < 1) {
+      throw new Error('公平混搭方案的局数配置不合法。')
+    }
+    for (let round = 0; round < repeat; round += 1) {
+      const roundMales = shuffle(maleIds)
+      const roundFemales = shuffle(femaleIds)
+      roundMales.forEach((maleId) => {
+        roundFemales.forEach((femaleId) => {
+          edges.push({ male: maleId, female: femaleId })
+        })
+      })
+    }
+  } else {
+    const maleStubs = []
+    const femaleStubs = []
+    maleIds.forEach((id) => {
+      for (let index = 0; index < games; index += 1) maleStubs.push(id)
+    })
+    femaleIds.forEach((id) => {
+      for (let index = 0; index < games; index += 1) femaleStubs.push(id)
+    })
+    const sortedMaleStubs = [...maleStubs].sort(
+      (a, b) => getLevelScore(b) - getLevelScore(a) || Math.random() - 0.5
+    )
+    const femalePool = [...femaleStubs]
+    sortedMaleStubs.forEach((maleId) => {
+      let bestIndex = 0
+      let bestScore = Number.POSITIVE_INFINITY
+      for (let index = 0; index < femalePool.length; index += 1) {
+        const candidateFemale = femalePool[index]
+        const score = Math.abs(getLevelScore(maleId) - getLevelScore(candidateFemale))
+        if (score < bestScore) {
+          bestScore = score
+          bestIndex = index
+        }
+      }
+      const [femaleId] = femalePool.splice(bestIndex, 1)
+      edges.push({
+        male: maleId,
+        female: femaleId,
+      })
+    })
+  }
+
+  let matchList = null
+  matchList = buildMatchesByEdges(edges)
+  if (!matchList?.length) throw new Error('赛程生成失败，请重试。')
 
   const rows = []
-  let pairNo = 1
-  for (let maleIndex = 0; maleIndex < size; maleIndex += 1) {
-    for (let femaleIndex = 0; femaleIndex < size; femaleIndex += 1) {
-      rows.push({
-        round_no: singleRoundNo,
-        group_no: pairNo,
-        event_code: 'mixed_double',
-        slot_code: 'mixed_male',
-        user_id: maleIds[maleIndex],
-      })
-      rows.push({
-        round_no: singleRoundNo,
-        group_no: pairNo,
-        event_code: 'mixed_double',
-        slot_code: 'mixed_female',
-        user_id: femaleIds[femaleIndex],
-      })
-      pairNo += 1
-    }
+  let pairNoCursor = 1
+  matchList.forEach((match) => {
+    rows.push({
+      round_no: singleRoundNo,
+      group_no: pairNoCursor,
+      event_code: 'mixed_double',
+      slot_code: 'mixed_male',
+      user_id: match.a.male,
+    })
+    rows.push({
+      round_no: singleRoundNo,
+      group_no: pairNoCursor,
+      event_code: 'mixed_double',
+      slot_code: 'mixed_female',
+      user_id: match.a.female,
+    })
+    rows.push({
+      round_no: singleRoundNo,
+      group_no: pairNoCursor + 1,
+      event_code: 'mixed_double',
+      slot_code: 'mixed_male',
+      user_id: match.b.male,
+    })
+    rows.push({
+      round_no: singleRoundNo,
+      group_no: pairNoCursor + 1,
+      event_code: 'mixed_double',
+      slot_code: 'mixed_female',
+      user_id: match.b.female,
+    })
+    pairNoCursor += 2
+  })
+
+  if (rows.length / 4 !== expectedMatchCount.value) {
+    throw new Error('生成赛程异常：对局数量与预期不一致。')
   }
 
   return rows
@@ -313,6 +480,7 @@ const reloadAll = async () => {
     loading.value = true
     await Promise.all([loadUsers(), loadDetail()])
     await loadBusinessData()
+    syncPlanSelection()
   } catch (error) {
     showErrorMessage(error)
   } finally {
@@ -371,6 +539,11 @@ const setLifecycle = async ({ stage, currentRoundNo: roundNo, currentRoundState 
 
 const onStartRandomMixed = async () => {
   try {
+
+    const rows2 = buildSingleRoundAssignments()
+    console.log(rows2)
+    return
+
     if (!canOperateLifecycle.value) throw new Error('仅管理员或创建者可开始赛事。')
     savingLifecycle.value = true
 
@@ -516,7 +689,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="detail-page" v-loading="loading">
+  <section class="detail-page" v-loading.fullscreen.lock="pageLoading">
     <el-card shadow="never">
       <template #header>
         <div class="title">{{ detail?.name || '随机混双轮转' }}</div>
@@ -530,13 +703,37 @@ onMounted(async () => {
       <div class="summary-block">
         <div class="summary-title">规则校验</div>
         <div class="meta" :class="{ 'meta--danger': !!getParticipantValidationError() }">
-          {{ getParticipantValidationError() || `通过：将生成 ${maleCount * femaleCount} 个男女搭档组合，每人出战 ${maleCount} 局。` }}
+          {{
+            getParticipantValidationError() ||
+            `通过：总人数 ${totalParticipantCount}，当前方案为${planCode === 'fair' ? '公平混搭' : '随机混搭'}，每人出战 ${gamesPerPlayer} 局，并按 level 优先匹配实力接近对手。`
+          }}
+        </div>
+      </div>
+
+      <div v-if="currentStage === 'participant_adjusting'" class="summary-block">
+        <div class="summary-title">赛程配置</div>
+        <div class="config-row">
+          <span class="config-label">方案选择</span>
+          <el-radio-group v-model="planCode" @change="syncPlanSelection">
+            <el-radio-button v-for="item in availablePlans" :key="item.value" :value="item.value">
+              {{ item.label }}
+            </el-radio-button>
+          </el-radio-group>
+        </div>
+        <div class="config-row">
+          <span class="config-label">每人局数</span>
+          <el-radio-group v-model="gamesPerPlayer">
+            <el-radio-button v-for="item in availableGamesPerPlayer" :key="item" :value="item">
+              {{ item }} 局
+            </el-radio-button>
+          </el-radio-group>
         </div>
       </div>
 
       <div v-if="currentStage !== 'participant_adjusting'" class="summary-block">
         <div class="summary-title">对局信息</div>
-        <div class="meta">总组合数：{{ pairList.length }}</div>
+        <div class="meta">方案：{{ planCode === 'fair' ? '公平混搭' : '随机混搭' }}</div>
+        <div class="meta">每人局数：{{ gamesPerPlayer }}</div>
         <div class="meta">总对局数：{{ totalMatchCount }}</div>
       </div>
 
@@ -623,6 +820,28 @@ onMounted(async () => {
   font-size: 13px;
   font-weight: 600;
   color: #303133;
+}
+
+.config-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.config-label {
+  width: 100px;
+  font-size: 13px;
+  color: #606266;
+  line-height: 32px;
+}
+
+:deep(.el-radio-group) {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .action-row {

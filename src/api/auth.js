@@ -1,12 +1,15 @@
-import { BaaS } from './client'
+﻿import { BaaS } from './client'
 
 const normalizeUser = (user) => {
   if (!user) return null
+  const rawLevel = user.level ?? ''
+  const levelText = String(rawLevel).trim()
   return {
     id: user.id || user.user_id || user._id,
     name: user.nickname || user.username || user.email || user.phone || '用户',
     nickname: user.nickname || '',
     gender: Number.isInteger(user.gender) ? user.gender : 0,
+    level: levelText || '-',
   }
 }
 
@@ -82,3 +85,4 @@ export const getCurrentUser = async () => {
 export const logoutRequest = async () => {
   await BaaS.auth.logout()
 }
+

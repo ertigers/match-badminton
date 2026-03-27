@@ -27,6 +27,12 @@ const nickname = computed(() => authStore.user?.nickname || authStore.user?.name
 const genderText = computed(() => genderMap[Number(authStore.user?.gender)] || '未知')
 const userId = computed(() => String(authStore.user?.id || '').trim())
 const formatWinRate = computed(() => `${Number(userStats.value.win_rate || 0)}%`)
+const displayLevel = computed(() => {
+  const statsLevel = String(userStats.value.level ?? '').trim()
+  if (statsLevel && statsLevel !== '-') return statsLevel
+  const authLevel = String(authStore.user?.level ?? '').trim()
+  return authLevel || '-'
+})
 
 const heroClass = computed(() => {
   const gender = Number(authStore.user?.gender)
@@ -86,7 +92,7 @@ const toAllTournaments = () => router.push('/matchs/all')
         <div class="hero__tags">
           <el-tag size="small" effect="dark" class="hero-tag" :class="genderClass">{{ genderText }}</el-tag>
           <el-tag size="small" type="success" effect="plain" class="hero-tag hero-tag--level">
-            Lv.{{ userStats.level || '-' }}
+            Lv.{{ displayLevel }}
           </el-tag>
         </div>
       </div>

@@ -31,7 +31,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="detail-dispatch-page" v-loading="loading">
+  <section class="detail-dispatch-page" v-loading.fullscreen.lock="loading">
     <TeamDetailPage v-if="mode === 'team'" />
     <RandomMixedDetailPage v-else-if="mode === 'random_mixed_rotate'" />
 

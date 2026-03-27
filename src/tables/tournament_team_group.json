@@ -1,0 +1,62 @@
+{
+  "name": "tournament_team_group",
+  "description": "团体赛分组信息",
+  "row_read_perm": [
+    "user:*"
+  ],
+  "row_write_perm": [
+    "user:*"
+  ],
+  "write_perm": [
+    "user:*"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "id",
+        "type": "id",
+        "description": "id"
+      },
+      {
+        "name": "tournament_id",
+        "type": "string",
+        "description": "赛事ID，对应 tournament.id"
+      },
+      {
+        "name": "group_no",
+        "type": "number",
+        "description": "分组编号，从1开始"
+      },
+      {
+        "name": "group_name",
+        "type": "string",
+        "description": "分组名称"
+      },
+      {
+        "name": "member_user_ids",
+        "type": "string",
+        "description": "该组成员 user_id 列表（JSON 字符串）"
+      },
+      {
+        "name": "enabled",
+        "type": "boolean",
+        "description": "是否启用"
+      },
+      {
+        "name": "created_by",
+        "type": "integer",
+        "description": "created_by"
+      },
+      {
+        "name": "created_at",
+        "type": "integer",
+        "description": "created_at"
+      },
+      {
+        "name": "updated_at",
+        "type": "integer",
+        "description": "updated_at"
+      }
+    ]
+  }
+}

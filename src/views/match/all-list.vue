@@ -38,7 +38,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="my-list-page" v-loading="loading">
+  <section class="my-list-page" v-loading.fullscreen.lock="loading">
     <el-card shadow="never">
       <template #header>
         <div class="title">全部比赛</div>

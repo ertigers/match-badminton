@@ -1,0 +1,175 @@
+{
+  "name": "tournament",
+  "description": "赛事主表",
+  "row_read_perm": [
+    "user:*"
+  ],
+  "row_write_perm": [
+    "user:*"
+  ],
+  "write_perm": [
+    "user:*"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "id",
+        "type": "id",
+        "description": "id"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "赛事名称"
+      },
+      {
+        "name": "match_mode",
+        "type": "string",
+        "description": "对局方式：fixed_mixed_rotate/random_mixed_rotate/team"
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "description": "赛事状态：draft/running/finished"
+      },
+      {
+        "name": "participant_count",
+        "type": "number",
+        "description": "参与人数"
+      },
+      {
+        "name": "created_by_user_id",
+        "type": "string",
+        "description": "创建者用户ID"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "team_event_codes",
+        "type": "string",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "团体项目编码数组（JSON 字符串）"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "team_round_count",
+        "type": "number",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "团体赛轮数"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "team_score_target",
+        "type": "number",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "团体赛分值 15/21/31"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "team_min_players_per_group",
+        "type": "number",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "根据项目自动计算的每组最少人数"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "team_group_count",
+        "type": "number",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "团体赛分队组数"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "stage",
+        "type": "string",
+        "default": "participant_adjusting",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "赛事阶段：registration_open/participant_adjusting/team_configuring/grouping/rounds_in_progress/finished"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "current_round_no",
+        "type": "number",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "当前轮次"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "current_round_state",
+        "type": "string",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "轮次状态：waiting_lineup/lineup_submitted/playing/scoring/round_finished"
+      },
+      {
+        "name": "created_by",
+        "type": "integer",
+        "description": "created_by"
+      },
+      {
+        "name": "created_at",
+        "type": "integer",
+        "description": "created_at"
+      },
+      {
+        "name": "updated_at",
+        "type": "integer",
+        "description": "updated_at"
+      }
+    ]
+  }
+}

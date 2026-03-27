@@ -50,6 +50,17 @@ const matchupScoreDraft = ref({})
 const savingMatchScore = ref(false)
 const refreshingMatchups = ref(false)
 const firstRoundLineupCollapsed = ref(true)
+const pageLoading = computed(
+  () =>
+    loading.value ||
+    savingParticipants.value ||
+    savingTeamConfig.value ||
+    savingTeamGroups.value ||
+    savingTeamAssignments.value ||
+    savingLifecycle.value ||
+    savingMatchScore.value ||
+    refreshingMatchups.value
+)
 
 const teamForm = ref({
   groupCount: 2,
@@ -1098,7 +1109,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="detail-page" v-loading="loading">
+  <section class="detail-page" v-loading.fullscreen.lock="pageLoading">
     <el-card shadow="never">
       <template #header>
         <div class="title">{{ detail?.name || '赛事详情' }}</div>

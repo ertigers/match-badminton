@@ -1,0 +1,72 @@
+{
+  "name": "tournament_team_assignment",
+  "description": "团体赛排位信息",
+  "row_read_perm": [
+    "user:*"
+  ],
+  "row_write_perm": [
+    "user:*"
+  ],
+  "write_perm": [
+    "user:*"
+  ],
+  "schema": {
+    "fields": [
+      {
+        "name": "id",
+        "type": "id",
+        "description": "id"
+      },
+      {
+        "name": "tournament_id",
+        "type": "string",
+        "description": "赛事ID，对应 tournament.id"
+      },
+      {
+        "name": "round_no",
+        "type": "number",
+        "description": "轮次，从1开始"
+      },
+      {
+        "name": "group_no",
+        "type": "number",
+        "description": "分组编号"
+      },
+      {
+        "name": "event_code",
+        "type": "string",
+        "description": "项目编码：male_double/mixed_double/female_double/male_single/female_single"
+      },
+      {
+        "name": "slot_code",
+        "type": "string",
+        "description": "位置编码：p1/p2/single/mixed_male/mixed_female"
+      },
+      {
+        "name": "user_id",
+        "type": "string",
+        "description": "出场用户ID"
+      },
+      {
+        "name": "enabled",
+        "type": "boolean",
+        "description": "是否启用"
+      },
+      {
+        "name": "created_by",
+        "type": "integer",
+        "description": "created_by"
+      },
+      {
+        "name": "created_at",
+        "type": "integer",
+        "description": "created_at"
+      },
+      {
+        "name": "updated_at",
+        "type": "integer",
+        "description": "updated_at"
+      }
+    ]
+  }
+}

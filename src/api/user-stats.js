@@ -11,7 +11,7 @@ const toNumberOrZero = (value) => {
 const normalizeStats = (item) => ({
   id: item?.id || '',
   user_id: String(item?.user_id || '').trim(),
-  level: String(item?.level || '').trim() || '-',
+  level: String(item?.level ?? '').trim() || '-',
   tournament_count: toNumberOrZero(item?.tournament_count),
   match_count: toNumberOrZero(item?.match_count),
   win_rate: toNumberOrZero(item?.win_rate),
@@ -46,8 +46,11 @@ export const listUserStatsMap = async (userIds = []) => {
   let records = []
 
   if (Array.isArray(userIds) && userIds.length) {
+    const normalizedUserIds = userIds
+      .map((item) => String(item ?? '').trim())
+      .filter(Boolean)
     const query = new BaaS.Query()
-    query.in('user_id', userIds.map((item) => String(item)))
+    query.in('user_id', normalizedUserIds)
     records = await findAll(table, query)
   } else {
     records = await findAll(table)

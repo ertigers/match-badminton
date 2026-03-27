@@ -25,6 +25,7 @@ const selectedUsers = computed(() => {
   const selectedSet = new Set(form.value.participantUserIds)
   return users.value.filter((item) => selectedSet.has(item.user_id))
 })
+const pageLoading = computed(() => loadingUsers.value || creating.value)
 
 const loadUsers = async () => {
   try {
@@ -93,7 +94,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="create-page">
+  <section class="create-page" v-loading.fullscreen.lock="pageLoading">
     <el-card shadow="never">
       <template #header>
         <div class="title">创建比赛</div>
@@ -126,7 +127,7 @@ onMounted(async () => {
       </div>
     </el-card>
 
-    <el-card shadow="never" v-loading="loadingUsers">
+    <el-card shadow="never">
       <template #header>
         <div class="header-row">
           <div class="title">选择参赛人员（{{ form.participantUserIds.length }}）</div>
