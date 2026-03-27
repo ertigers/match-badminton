@@ -1,0 +1,140 @@
+{
+  "tables": [
+    {
+      "name": "permission",
+      "description": "权限字典",
+      "write_perm": ["user:*"],
+      "row_write_perm": ["user:*"],
+      "row_read_perm": ["user:*"],
+      "schema": {
+        "fields": [
+          { "name": "code", "type": "string", "description": "权限码，例如 admin" },
+          { "name": "name", "type": "string", "description": "权限名称" },
+          { "name": "enabled", "type": "boolean", "description": "是否启用" }
+        ]
+      }
+    },
+    {
+      "name": "user_permission",
+      "description": "用户权限关系",
+      "write_perm": ["user:*"],
+      "row_write_perm": ["user:*"],
+      "row_read_perm": ["user:*"],
+      "schema": {
+        "fields": [
+          { "name": "user_id", "type": "string", "description": "用户ID，对应 _userprofile.id" },
+          { "name": "permission_code", "type": "string", "description": "权限码，对应 permission.code" },
+          { "name": "enabled", "type": "boolean", "description": "是否生效" }
+        ]
+      }
+    },
+    {
+      "name": "user_stats",
+      "description": "用户扩展统计信息",
+      "write_perm": ["user:*"],
+      "row_write_perm": ["user:*"],
+      "row_read_perm": ["user:*"],
+      "schema": {
+        "fields": [
+          { "name": "user_id", "type": "string", "description": "用户ID，对应 _userprofile.id" },
+          { "name": "level", "type": "string", "description": "等级" },
+          { "name": "tournament_count", "type": "number", "description": "参赛次数" },
+          { "name": "match_count", "type": "number", "description": "对局次数" },
+          { "name": "win_rate", "type": "number", "description": "胜率，建议存 0-100" }
+        ]
+      }
+    },
+    {
+      "name": "tournament",
+      "description": "赛事主表",
+      "write_perm": ["user:*"],
+      "row_write_perm": ["user:*"],
+      "row_read_perm": ["user:*"],
+      "schema": {
+        "fields": [
+          { "name": "name", "type": "string", "description": "赛事名称" },
+          { "name": "match_mode", "type": "string", "description": "对局方式：fixed_mixed_rotate/random_mixed_rotate/team" },
+          { "name": "status", "type": "string", "description": "赛事状态：draft/running/finished" },
+          { "name": "participant_count", "type": "number", "description": "参与人数" },
+          { "name": "created_by_user_id", "type": "string", "description": "创建者用户ID" },
+          { "name": "stage", "type": "string", "description": "赛事阶段：participant_adjusting/team_configuring/grouping/rounds_in_progress/finished" },
+          { "name": "current_round_no", "type": "number", "description": "当前轮次" },
+          { "name": "current_round_state", "type": "string", "description": "轮次状态：waiting_lineup/lineup_submitted/playing/scoring/round_finished" },
+          { "name": "team_group_count", "type": "number", "description": "团体赛分队组数" },
+          { "name": "team_event_codes", "type": "string", "description": "团体项目编码数组（JSON 字符串）" },
+          { "name": "team_round_count", "type": "number", "description": "团体赛轮数" },
+          { "name": "team_score_target", "type": "number", "description": "团体赛分值 15/21/31" },
+          { "name": "team_min_players_per_group", "type": "number", "description": "根据项目自动计算的每组最少人数" }
+        ]
+      }
+    },
+    {
+      "name": "tournament_participant",
+      "description": "赛事参与人员表",
+      "write_perm": ["user:*"],
+      "row_write_perm": ["user:*"],
+      "row_read_perm": ["user:*"],
+      "schema": {
+        "fields": [
+          { "name": "tournament_id", "type": "string", "description": "赛事ID，对应 tournament.id" },
+          { "name": "user_id", "type": "string", "description": "参与用户ID" },
+          { "name": "nickname", "type": "string", "description": "参与用户昵称（冗余字段，便于展示）" },
+          { "name": "enabled", "type": "boolean", "description": "是否有效参与" }
+        ]
+      }
+    },
+    {
+      "name": "tournament_team_group",
+      "description": "团体赛分组信息",
+      "write_perm": ["user:*"],
+      "row_write_perm": ["user:*"],
+      "row_read_perm": ["user:*"],
+      "schema": {
+        "fields": [
+          { "name": "tournament_id", "type": "string", "description": "赛事ID，对应 tournament.id" },
+          { "name": "group_no", "type": "number", "description": "分组编号，从1开始" },
+          { "name": "group_name", "type": "string", "description": "分组名称" },
+          { "name": "member_user_ids", "type": "string", "description": "该组成员 user_id 列表（JSON 字符串）" },
+          { "name": "enabled", "type": "boolean", "description": "是否启用" }
+        ]
+      }
+    },
+    {
+      "name": "tournament_team_assignment",
+      "description": "团体赛排位信息",
+      "write_perm": ["user:*"],
+      "row_write_perm": ["user:*"],
+      "row_read_perm": ["user:*"],
+      "schema": {
+        "fields": [
+          { "name": "tournament_id", "type": "string", "description": "赛事ID，对应 tournament.id" },
+          { "name": "round_no", "type": "number", "description": "轮次，从1开始" },
+          { "name": "group_no", "type": "number", "description": "分组编号" },
+          { "name": "event_code", "type": "string", "description": "项目编码：male_double/mixed_double/female_double/male_single/female_single" },
+          { "name": "slot_code", "type": "string", "description": "位置编码：p1/p2/single/mixed_male/mixed_female" },
+          { "name": "user_id", "type": "string", "description": "出场用户ID" },
+          { "name": "enabled", "type": "boolean", "description": "是否启用" }
+        ]
+      }
+    },
+    {
+      "name": "tournament_team_match_score",
+      "description": "团体赛对局比分表",
+      "write_perm": ["user:*"],
+      "row_write_perm": ["user:*"],
+      "row_read_perm": ["user:*"],
+      "schema": {
+        "fields": [
+          { "name": "tournament_id", "type": "string", "description": "赛事ID，对应 tournament.id" },
+          { "name": "round_no", "type": "number", "description": "轮次，从1开始" },
+          { "name": "event_code", "type": "string", "description": "项目编码：male_double/mixed_double/female_double/male_single/female_single" },
+          { "name": "home_group_no", "type": "number", "description": "主队分组编号（较小编号）" },
+          { "name": "away_group_no", "type": "number", "description": "客队分组编号（较大编号）" },
+          { "name": "home_score", "type": "number", "description": "主队得分" },
+          { "name": "away_score", "type": "number", "description": "客队得分" },
+          { "name": "enabled", "type": "boolean", "description": "是否启用" }
+        ]
+      }
+    }
+  ]
+}
