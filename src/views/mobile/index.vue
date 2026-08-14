@@ -1,26 +1,46 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { House, User } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const activeTab = computed(() => (route.path.startsWith('/mine') ? 'mine' : 'home'))
+const showTabBar = computed(
+  () =>
+    authStore.isAdmin || authStore.hasPermission('admin') || authStore.hasPermission('admin-common')
+)
 
 const onTabChange = (value) => {
   if (value === activeTab.value) return
   router.push(value === 'home' ? '/home' : '/mine')
 }
+
+watch(
+  showTabBar,
+  (visible) => {
+    if (!visible && route.path.startsWith('/home')) {
+      router.replace('/mine')
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
   <div class="mobile-layout">
-    <main class="mobile-layout__content">
-      <RouterView />
+    <main class="mobile-layout__content" :class="{ 'mobile-layout__content--single': !showTabBar }">
+      <RouterView v-slot="{ Component }">
+        <KeepAlive :max="2">
+          <component :is="Component" />
+        </KeepAlive>
+      </RouterView>
     </main>
 
-    <nav class="mobile-layout__tabbar">
+    <nav v-if="showTabBar" class="mobile-layout__tabbar">
       <button
         class="mobile-tab"
         :class="{ 'mobile-tab--active': activeTab === 'home' }"
@@ -49,6 +69,10 @@ const onTabChange = (value) => {
 
 .mobile-layout__content {
   padding-bottom: 72px;
+}
+
+.mobile-layout__content--single {
+  padding-bottom: 0;
 }
 
 .mobile-layout__tabbar {

@@ -9,6 +9,7 @@ import {
   listTournamentTeamMatchScores,
   saveTournamentTeamAssignments,
   saveTournamentTeamMatchScore,
+  settleTournamentStatistics,
   updateTournamentLifecycle,
   updateTournamentParticipants,
 } from '@/api/tournament'
@@ -28,6 +29,7 @@ const participantEditorVisible = ref(false)
 const selectedParticipantIds = ref([])
 const savingParticipants = ref(false)
 const savingLifecycle = ref(false)
+const settlingStatistics = ref(false)
 const savingMatchScore = ref(false)
 const refreshingMatchups = ref(false)
 const pageLoading = computed(
@@ -35,6 +37,7 @@ const pageLoading = computed(
     loading.value ||
     savingParticipants.value ||
     savingLifecycle.value ||
+    settlingStatistics.value ||
     savingMatchScore.value ||
     refreshingMatchups.value
 )
@@ -296,6 +299,15 @@ const getUnscoredMatchKeys = () => {
   })
 }
 
+const randomMixedFinishState = computed(() => {
+  const total = Number(totalMatchCount.value || 0)
+  const unscoredCount = getUnscoredMatchKeys().length
+  return {
+    canFinish: total > 0 && unscoredCount === 0,
+    unscoredCount,
+  }
+})
+
 const buildScoreDraft = (scores = []) => {
   const next = {}
   ;(Array.isArray(scores) ? scores : [])
@@ -546,6 +558,17 @@ const setLifecycle = async ({ stage, currentRoundNo: roundNo, currentRoundState 
   await loadDetail()
 }
 
+const settleStatistics = async () => {
+  try {
+    settlingStatistics.value = true
+    const settled = await settleTournamentStatistics(detail.value?.id)
+    detail.value = { ...detail.value, ...settled }
+    return settled
+  } finally {
+    settlingStatistics.value = false
+  }
+}
+
 const onStartRandomMixed = async () => {
   try {
 
@@ -560,6 +583,10 @@ const onStartRandomMixed = async () => {
     await saveTournamentTeamAssignments({
       tournamentId: detail.value?.id,
       assignments: rows,
+      scope: {
+        roundNo: singleRoundNo,
+        groupNos: [...new Set(rows.map((item) => Number(item.group_no)))],
+      },
     })
 
     await setLifecycle({
@@ -582,6 +609,8 @@ const onFinishTournament = async () => {
     if (!canOperateLifecycle.value) throw new Error('仅管理员或创建者可完赛。')
     savingLifecycle.value = true
 
+    await loadBusinessData()
+    if (totalMatchCount.value < 1) throw new Error('当前没有可结算的对局，不能完赛。')
     const unscoredKeys = getUnscoredMatchKeys()
     if (unscoredKeys.length > 0) {
       throw new Error(`还有 ${unscoredKeys.length} 场未录分，不能完赛。`)
@@ -593,6 +622,7 @@ const onFinishTournament = async () => {
       type: 'warning',
     })
 
+    await settleStatistics()
     await setLifecycle({
       stage: 'finished',
       currentRoundNo: singleRoundNo,
@@ -643,10 +673,7 @@ const onMatchScoreSubmit = async ({ matchKey, homeScore, awayScore }) => {
       },
     })
 
-    matchupScoreDraft.value[key] = {
-      homeScore: nextHome,
-      awayScore: nextAway,
-    }
+    await loadBusinessData()
 
     ElMessage.success('比分已保存')
   } catch (error) {
@@ -673,7 +700,18 @@ const lifecycleActionButtons = computed(() => {
     return [{ key: 'start_random_mixed', label: '生成赛程并开始比赛', type: 'primary' }]
   }
   if (currentStage.value === 'rounds_in_progress') {
-    return [{ key: 'finish_tournament', label: '完成赛事', type: 'primary' }]
+    const { canFinish, unscoredCount } = randomMixedFinishState.value
+    return [
+      {
+        key: 'finish_tournament',
+        label: unscoredCount ? `完成赛事（还差 ${unscoredCount} 场）` : '完成赛事',
+        type: 'primary',
+        disabled: !canFinish,
+      },
+    ]
+  }
+  if (currentStage.value === 'finished' && detail.value?.settlement_status !== 'completed') {
+    return [{ key: 'settle_statistics', label: '补结算统计', type: 'warning' }]
   }
   return []
 })
@@ -685,6 +723,20 @@ const onLifecycleAction = async (action) => {
   }
   if (action === 'finish_tournament') {
     await onFinishTournament()
+    return
+  }
+  if (action === 'settle_statistics') {
+    try {
+      await ElMessageBox.confirm('确认根据现有赛程和比分补结算个人统计吗？', '补结算统计', {
+        confirmButtonText: '确认结算',
+        cancelButtonText: '取消',
+        type: 'warning',
+      })
+      await settleStatistics()
+      ElMessage.success('赛事统计已补结算')
+    } catch (error) {
+      showErrorMessage(error)
+    }
   }
 }
 
@@ -695,8 +747,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="detail-page" v-loading.fullscreen.lock="pageLoading">
-    <el-card shadow="never">
+  <section v-loading.fullscreen.lock="pageLoading" class="detail-page">
+    <el-card class="overview-card" shadow="never">
       <template #header>
         <div class="title">{{ detail?.name || '随机混双轮转' }}</div>
       </template>
@@ -777,14 +829,14 @@ onMounted(async () => {
     />
 
     <div v-if="lifecycleActionButtons.length" class="action-row">
-      <div class="meta" v-if="!canOperateLifecycle">仅管理员或创建者可推进赛事</div>
+      <div v-if="!canOperateLifecycle" class="meta">仅管理员或创建者可推进赛事</div>
       <el-button
         v-for="item in lifecycleActionButtons"
         :key="item.key"
         :type="item.type || 'primary'"
         size="large"
-        :loading="savingLifecycle"
-        :disabled="!canOperateLifecycle"
+        :loading="savingLifecycle || settlingStatistics"
+        :disabled="!canOperateLifecycle || item.disabled"
         class="action-btn"
         @click="onLifecycleAction(item.key)"
       >
@@ -801,8 +853,8 @@ onMounted(async () => {
 }
 
 .title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 700;
 }
 
 .meta {
@@ -816,9 +868,11 @@ onMounted(async () => {
 }
 
 .summary-block {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed #ebeef5;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(120, 134, 161, 0.12);
+  border-radius: 13px;
+  background: #f8f9fd;
 }
 
 .summary-title {
@@ -859,6 +913,7 @@ onMounted(async () => {
 }
 
 .action-btn {
-  min-width: 220px;
+  width: 100%;
+  min-height: 46px;
 }
 </style>

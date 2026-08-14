@@ -1,8 +1,7 @@
 ﻿<script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowRight, Calendar, DataLine, Grid, Medal, Plus, Trophy } from '@element-plus/icons-vue'
-import { listUserStatsMap } from '../../api/user-stats'
+import { ArrowRight, Grid, Plus, Trophy } from '@element-plus/icons-vue'
 import { useAuthStore } from '../../stores/auth'
 
 const router = useRouter()
@@ -14,25 +13,8 @@ const genderMap = {
   2: '女',
 }
 
-const defaultStats = {
-  level: '-',
-  tournament_count: 0,
-  match_count: 0,
-  win_rate: 0,
-}
-
-const userStats = ref({ ...defaultStats })
-
 const nickname = computed(() => authStore.user?.nickname || authStore.user?.name || '用户')
 const genderText = computed(() => genderMap[Number(authStore.user?.gender)] || '未知')
-const userId = computed(() => String(authStore.user?.id || '').trim())
-const formatWinRate = computed(() => `${Number(userStats.value.win_rate || 0)}%`)
-const displayLevel = computed(() => {
-  const statsLevel = String(userStats.value.level ?? '').trim()
-  if (statsLevel && statsLevel !== '-') return statsLevel
-  const authLevel = String(authStore.user?.level ?? '').trim()
-  return authLevel || '-'
-})
 
 const heroClass = computed(() => {
   const gender = Number(authStore.user?.gender)
@@ -48,39 +30,14 @@ const genderClass = computed(() => {
   return 'hero-tag--unknown'
 })
 
-const hasAdminPermission = computed(
-  () => authStore.isAdmin || authStore.hasPermission('admin')
-)
+const hasAdminPermission = computed(() => authStore.isAdmin || authStore.hasPermission('admin'))
 
 const hasAdminCommonPermission = computed(
   () => authStore.isAdmin || authStore.hasPermission('admin-common')
 )
 
-const loadMyStats = async () => {
-  if (!userId.value) {
-    userStats.value = { ...defaultStats }
-    return
-  }
-  try {
-    const statsMap = await listUserStatsMap([userId.value])
-    userStats.value = { ...defaultStats, ...(statsMap[userId.value] || {}) }
-  } catch {
-    userStats.value = { ...defaultStats }
-  }
-}
-
-watch(userId, async () => {
-  await loadMyStats()
-})
-
-onMounted(async () => {
-  await loadMyStats()
-})
-
 const toAdmin = () => router.push('/admin/users')
 const toCreateTournament = () => router.push('/matchs/create')
-const toMyParticipatingTournaments = () => router.push('/matchs/my')
-const toMyCreatedTournaments = () => router.push('/matchs/created')
 const toAllTournaments = () => router.push('/matchs/all')
 </script>
 
@@ -88,46 +45,34 @@ const toAllTournaments = () => router.push('/matchs/all')
   <section class="home-page">
     <div class="hero" :class="heroClass">
       <div class="hero__top">
-        <p class="hero__welcome">欢迎回来，<span>{{ nickname }}</span></p>
+        <div>
+          <p class="hero__welcome">
+            欢迎回来，<span>{{ nickname }}</span>
+          </p>
+          <p class="hero__subtitle">准备好开启今天的羽球时光了吗？</p>
+        </div>
         <div class="hero__tags">
-          <el-tag size="small" effect="dark" class="hero-tag" :class="genderClass">{{ genderText }}</el-tag>
-          <el-tag size="small" type="success" effect="plain" class="hero-tag hero-tag--level">
-            Lv.{{ displayLevel }}
-          </el-tag>
-        </div>
-      </div>
-
-      <div class="hero__stats">
-        <div class="hero-stat">
-          <span class="stat-label"><el-icon>
-              <Trophy />
-            </el-icon>参赛次数</span>
-          <span class="stat-value">{{ Number(userStats.tournament_count || 0) }}</span>
-        </div>
-        <div class="hero-stat">
-          <span class="stat-label"><el-icon>
-              <Medal />
-            </el-icon>对局次数</span>
-          <span class="stat-value">{{ Number(userStats.match_count || 0) }}</span>
-        </div>
-        <div class="hero-stat">
-          <span class="stat-label"><el-icon>
-              <DataLine />
-            </el-icon>胜率</span>
-          <span class="stat-value">{{ formatWinRate }}</span>
+          <el-tag size="small" effect="dark" class="hero-tag" :class="genderClass">{{
+            genderText
+          }}</el-tag>
         </div>
       </div>
     </div>
 
-    <div class="section-title">快捷入口</div>
-    <div class="quick-grid">
-      <el-card v-if="hasAdminPermission" shadow="hover" class="quick-card--clickable" @click="toAdmin">
+    <div v-if="hasAdminPermission || hasAdminCommonPermission" class="section-title">快捷入口</div>
+    <div v-if="hasAdminPermission || hasAdminCommonPermission" class="quick-grid">
+      <el-card
+        v-if="hasAdminPermission"
+        shadow="hover"
+        class="quick-card--clickable"
+        @click="toAdmin"
+      >
         <div class="quick-item">
           <div class="quick-item__head">
             <div class="quick-item__left">
-              <span class="quick-item__icon quick-item__icon--admin"><el-icon>
-                  <Grid />
-                </el-icon></span>
+              <span class="quick-item__icon quick-item__icon--admin"
+                ><el-icon> <Grid /> </el-icon
+              ></span>
               <h3>用户管理</h3>
             </div>
             <el-icon class="quick-item__arrow">
@@ -138,13 +83,18 @@ const toAllTournaments = () => router.push('/matchs/all')
         </div>
       </el-card>
 
-      <el-card v-if="hasAdminCommonPermission" shadow="hover" class="quick-card--clickable" @click="toCreateTournament">
+      <el-card
+        v-if="hasAdminCommonPermission"
+        shadow="hover"
+        class="quick-card--clickable"
+        @click="toCreateTournament"
+      >
         <div class="quick-item">
           <div class="quick-item__head">
             <div class="quick-item__left">
-              <span class="quick-item__icon quick-item__icon--create"><el-icon>
-                  <Plus />
-                </el-icon></span>
+              <span class="quick-item__icon quick-item__icon--create"
+                ><el-icon> <Plus /> </el-icon
+              ></span>
               <h3>创建比赛</h3>
             </div>
             <el-icon class="quick-item__arrow">
@@ -155,48 +105,18 @@ const toAllTournaments = () => router.push('/matchs/all')
         </div>
       </el-card>
 
-      <el-card shadow="hover" class="quick-card--clickable" @click="toMyParticipatingTournaments">
+      <el-card
+        v-if="hasAdminPermission"
+        shadow="hover"
+        class="quick-card--clickable"
+        @click="toAllTournaments"
+      >
         <div class="quick-item">
           <div class="quick-item__head">
             <div class="quick-item__left">
-              <span class="quick-item__icon quick-item__icon--mine"><el-icon>
-                  <Calendar />
-                </el-icon></span>
-              <h3>我参与的比赛</h3>
-            </div>
-            <el-icon class="quick-item__arrow">
-              <ArrowRight />
-            </el-icon>
-          </div>
-          <p>查看我参与过的比赛并进入详情</p>
-        </div>
-      </el-card>
-
-      <el-card v-if="hasAdminCommonPermission" shadow="hover" class="quick-card--clickable"
-        @click="toMyCreatedTournaments">
-        <div class="quick-item">
-          <div class="quick-item__head">
-            <div class="quick-item__left">
-              <span class="quick-item__icon quick-item__icon--created"><el-icon>
-                  <Trophy />
-                </el-icon></span>
-              <h3>我创建的比赛</h3>
-            </div>
-            <el-icon class="quick-item__arrow">
-              <ArrowRight />
-            </el-icon>
-          </div>
-          <p>查看我创建的比赛列表</p>
-        </div>
-      </el-card>
-
-      <el-card v-if="hasAdminPermission" shadow="hover" class="quick-card--clickable" @click="toAllTournaments">
-        <div class="quick-item">
-          <div class="quick-item__head">
-            <div class="quick-item__left">
-              <span class="quick-item__icon quick-item__icon--all"><el-icon>
-                  <Trophy />
-                </el-icon></span>
+              <span class="quick-item__icon quick-item__icon--all"
+                ><el-icon> <Trophy /> </el-icon
+              ></span>
               <h3>全部比赛</h3>
             </div>
             <el-icon class="quick-item__arrow">
@@ -220,10 +140,10 @@ const toAllTournaments = () => router.push('/matchs/all')
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: space-around;
+  justify-content: center;
   border-radius: 16px;
-  min-height: 168px;
-  padding: 18px 14px 16px;
+  min-height: 120px;
+  padding: 20px 16px;
   color: #fff;
   box-shadow: 0 10px 22px rgba(64, 158, 255, 0.22);
 }
@@ -273,6 +193,12 @@ const toAllTournaments = () => router.push('/matchs/all')
   font-weight: 700;
 }
 
+.hero__subtitle {
+  margin: 7px 0 0;
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 12px;
+}
+
 .hero__tags {
   display: inline-flex;
   align-items: center;
@@ -293,47 +219,6 @@ const toAllTournaments = () => router.push('/matchs/all')
 
 .hero-tag--unknown {
   background: #909399;
-}
-
-.hero-tag--level {
-  background: rgba(255, 255, 255, 0.96);
-  color: #409eff;
-  font-weight: 600;
-}
-
-.hero__stats {
-  margin-top: 14px;
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
-}
-
-.hero-stat {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 10px;
-  min-height: 76px;
-  padding: 10px 6px 8px;
-  display: grid;
-  gap: 6px;
-  align-content: center;
-}
-
-.stat-label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 11px;
-}
-
-.stat-value {
-  font-size: 17px;
-  color: #fff;
-  font-weight: 700;
-  text-align: center;
 }
 
 .section-title {
@@ -378,14 +263,6 @@ const toAllTournaments = () => router.push('/matchs/all')
   background: linear-gradient(135deg, #4cc9a7, #65d6bc);
 }
 
-.quick-item__icon--mine {
-  background: linear-gradient(135deg, #ff9f43, #ffbc6d);
-}
-
-.quick-item__icon--created {
-  background: linear-gradient(135deg, #a77cff, #bf9bff);
-}
-
 .quick-item__icon--all {
   background: linear-gradient(135deg, #f56c6c, #ff8a8a);
 }
@@ -417,4 +294,3 @@ const toAllTournaments = () => router.push('/matchs/all')
   transform: translateY(-1px);
 }
 </style>
-

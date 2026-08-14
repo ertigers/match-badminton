@@ -128,7 +128,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="permission-page" v-loading="loading">
+  <section v-loading="loading" class="permission-page">
     <el-card shadow="never">
       <template #header>
         <div class="title">新建权限</div>
@@ -205,12 +205,13 @@ onMounted(async () => {
 <style scoped>
 .permission-page {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .title {
-  font-size: 15px;
-  font-weight: 600;
+  color: #202938;
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .form-grid {
@@ -233,9 +234,10 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid #eef0f3;
-  border-radius: 10px;
-  padding: 10px;
+  border: 1px solid rgba(121, 135, 163, 0.12);
+  border-radius: 13px;
+  padding: 12px;
+  background: #f8f9fd;
 }
 
 .user {

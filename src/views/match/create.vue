@@ -97,19 +97,25 @@ onMounted(async () => {
 
 <template>
   <section v-loading.fullscreen.lock="pageLoading" class="create-page">
-    <el-card shadow="never">
+    <div class="create-intro">
+      <span>NEW MATCH</span>
+      <strong>发起一场新比赛</strong>
+      <p>设置基础信息并选择参赛人员，创建后仍可继续调整。</p>
+    </div>
+
+    <el-card class="step-card" shadow="never">
       <template #header>
-        <div class="title">创建比赛</div>
+        <div class="step-title"><span>1</span><div><strong>比赛信息</strong><small>给比赛起一个容易识别的名称</small></div></div>
       </template>
       <div class="form-block">
         <div class="label">比赛名称</div>
-        <el-input v-model="form.name" placeholder="请输入比赛名称" />
+        <el-input v-model="form.name" size="large" placeholder="例如：周六羽毛球友谊赛" />
       </div>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card class="step-card" shadow="never">
       <template #header>
-        <div class="title">对局方式</div>
+        <div class="step-title"><span>2</span><div><strong>对局方式</strong><small>选择本场比赛使用的赛制</small></div></div>
       </template>
       <div class="mode-list">
         <div
@@ -122,6 +128,7 @@ onMounted(async () => {
           }"
           @click="!mode.disabled && (form.matchMode = mode.code)"
         >
+          <span class="mode-radio"></span>
           <div class="mode-label">{{ mode.label }}</div>
           <div class="mode-desc">{{ mode.description }}</div>
           <div v-if="mode.disabled" class="mode-note">{{ mode.note || '暂未开放' }}</div>
@@ -129,10 +136,10 @@ onMounted(async () => {
       </div>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card class="step-card" shadow="never">
       <template #header>
         <div class="header-row">
-          <div class="title">选择参赛人员（{{ form.participantUserIds.length }}）</div>
+          <div class="step-title"><span>3</span><div><strong>参赛人员</strong><small>已选择 {{ form.participantUserIds.length }} 人</small></div></div>
           <div class="actions">
             <el-button size="small" @click="selectAllUsers">全选</el-button>
             <el-button size="small" @click="clearUsers">清空</el-button>
@@ -159,21 +166,88 @@ onMounted(async () => {
       </div>
     </el-card>
 
-    <el-button type="primary" :loading="creating" @click="onCreateTournament"
-      >创建并进入比赛</el-button
-    >
+    <div class="submit-bar">
+      <el-button class="submit-btn" size="large" type="primary" :loading="creating" @click="onCreateTournament">
+        创建并进入比赛
+      </el-button>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .create-page {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
-.title {
+.create-intro {
+  padding: 18px 18px 16px;
+  border-radius: 20px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(255, 255, 255, 0.26), transparent 30%),
+    linear-gradient(135deg, #5d78f2, #654fc5);
+  box-shadow: 0 16px 30px rgba(74, 88, 183, 0.2);
+}
+
+.create-intro span,
+.create-intro strong {
+  display: block;
+}
+
+.create-intro span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  opacity: 0.72;
+}
+
+.create-intro strong {
+  margin-top: 5px;
+  font-size: 21px;
+}
+
+.create-intro p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0.78;
+}
+
+.step-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.step-title > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  color: #4f6df5;
+  font-size: 13px;
+  font-weight: 700;
+  background: #eef1ff;
+}
+
+.step-title strong,
+.step-title small {
+  display: block;
+}
+
+.step-title strong {
+  color: #202938;
   font-size: 15px;
-  font-weight: 600;
+}
+
+.step-title small {
+  margin-top: 2px;
+  color: #929aab;
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .form-block .label {
@@ -188,14 +262,32 @@ onMounted(async () => {
 }
 
 .mode-item {
+  position: relative;
   border: 1px solid #ebeef5;
-  border-radius: 10px;
-  padding: 10px;
+  border-radius: 14px;
+  padding: 13px 13px 13px 42px;
+  background: #fafbfe;
 }
 
 .mode-item--active {
-  border-color: #409eff;
-  background: #ecf5ff;
+  border-color: #7187f5;
+  background: linear-gradient(135deg, #f1f4ff, #eef1ff);
+  box-shadow: inset 0 0 0 1px rgba(79, 109, 245, 0.08);
+}
+
+.mode-radio {
+  position: absolute;
+  top: 17px;
+  left: 14px;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #c5cada;
+  border-radius: 50%;
+}
+
+.mode-item--active .mode-radio {
+  border: 5px solid #4f6df5;
+  background: #fff;
 }
 
 .mode-item--disabled {
@@ -246,21 +338,21 @@ onMounted(async () => {
 
 .user-item {
   border: 1px solid #ebeef5;
-  border-radius: 8px;
-  padding: 6px 4px;
+  border-radius: 12px;
+  padding: 9px 5px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  min-height: 46px;
+  min-height: 54px;
   text-align: center;
   position: relative;
 }
 
 .user-item--active {
-  border-color: #67c23a;
-  background: #f0f9eb;
+  border-color: #6d83f2;
+  box-shadow: inset 0 0 0 1px rgba(79, 109, 245, 0.1);
 }
 
 .user-item--male {
@@ -285,11 +377,28 @@ onMounted(async () => {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #67c23a;
+  background: #4f6df5;
   color: #fff;
   font-size: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.submit-bar {
+  position: sticky;
+  bottom: 10px;
+  z-index: 8;
+  padding: 8px;
+  border: 1px solid rgba(121, 135, 163, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 12px 28px rgba(45, 62, 100, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.submit-btn {
+  width: 100%;
+  min-height: 46px;
 }
 </style>

@@ -1,4 +1,5 @@
 import { BaaS } from './client'
+import { listUserStatsMap, upsertUserStats } from './user-stats'
 
 const TOURNAMENT_TABLE = 'tournament'
 const TOURNAMENT_PARTICIPANT_TABLE = 'tournament_participant'
@@ -6,6 +7,7 @@ const TOURNAMENT_TEAM_GROUP_TABLE = 'tournament_team_group'
 const TOURNAMENT_TEAM_ASSIGNMENT_TABLE = 'tournament_team_assignment'
 const TOURNAMENT_TEAM_MATCH_SCORE_TABLE = 'tournament_team_match_score'
 const PAGE_SIZE = 100
+const WRITE_BATCH_SIZE = 4
 
 export const TEAM_EVENT_OPTIONS = [
   {
@@ -288,6 +290,13 @@ export const getTeamEventSlots = (eventCodes) =>
 
 const serializeJsonArray = (value) => JSON.stringify(Array.isArray(value) ? value : [])
 
+const runWriteBatches = async (items, handler, batchSize = WRITE_BATCH_SIZE) => {
+  const list = Array.isArray(items) ? items : []
+  for (let index = 0; index < list.length; index += batchSize) {
+    await Promise.all(list.slice(index, index + batchSize).map((item) => handler(item)))
+  }
+}
+
 const normalizeTournamentStage = (stage) => {
   const value = String(stage || '').trim()
   if (TOURNAMENT_STAGES.includes(value)) return value
@@ -372,6 +381,8 @@ export const createTournament = async ({
     stage: 'participant_adjusting',
     current_round_no: 0,
     current_round_state: 'waiting_lineup',
+    settlement_status: 'pending',
+    settled_at: 0,
     participant_count: participantList.length,
     created_by_user_id: String(creatorUserId || '').trim(),
     team_group_count: normalizedTeamConfig?.groupCount || null,
@@ -394,16 +405,21 @@ export const createTournament = async ({
   if (!realTournamentId) throw new Error('创建赛事成功但未获取到赛事ID')
 
   const participantTable = new BaaS.TableObject(TOURNAMENT_PARTICIPANT_TABLE)
-  for (const participant of participantList) {
+  await runWriteBatches(participantList, async (participant) => {
     const record = participantTable.create()
     record.set({
       tournament_id: realTournamentId,
       user_id: participant.user_id,
       nickname: participant.nickname || participant.user_id,
       enabled: true,
+      match_count: 0,
+      win_count: 0,
+      loss_count: 0,
+      win_rate: 0,
+      stats_settled: false,
     })
     await record.save()
-  }
+  })
 
   return {
     id: realTournamentId,
@@ -436,6 +452,8 @@ export const getTournamentDetail = async (id) => {
     stage: normalizeTournamentStage(tournament.stage),
     current_round_no: Number(tournament.current_round_no || 0),
     current_round_state: normalizeRoundState(tournament.current_round_state),
+    settlement_status: String(tournament.settlement_status || 'pending'),
+    settled_at: Number(tournament.settled_at || 0),
     created_by_user_id: String(tournament.created_by_user_id || ''),
     participant_count: Number(tournament.participant_count || participants.length || 0),
     team_config: {
@@ -454,6 +472,11 @@ export const getTournamentDetail = async (id) => {
       id: item.id || '',
       user_id: item.user_id || '',
       nickname: item.nickname || '',
+      match_count: Number(item.match_count || 0),
+      win_count: Number(item.win_count || 0),
+      loss_count: Number(item.loss_count || 0),
+      win_rate: Number(item.win_rate || 0),
+      stats_settled: Boolean(item.stats_settled),
     })),
   }
 }
@@ -590,38 +613,57 @@ export const saveTournamentTeamGroups = async ({ tournamentId, groups }) => {
 
   const toRemove = currentRecords.filter((item) => !nextByGroupNo.has(Number(item?.group_no)))
   const toCreate = normalizedGroups.filter((item) => !currentByGroupNo.has(item.group_no))
-  const toUpdate = normalizedGroups.filter((item) => currentByGroupNo.has(item.group_no))
-
-  for (const item of toRemove) {
-    if (!item?.id) continue
-    const record = table.getWithoutData(item.id)
-    record.set('enabled', false)
-    await record.update()
-  }
-
-  for (const item of toCreate) {
-    const record = table.create()
-    record.set({
-      tournament_id: id,
-      group_no: item.group_no,
-      group_name: item.group_name,
-      member_user_ids: serializeJsonArray(item.member_user_ids),
-      enabled: true,
-    })
-    await record.save()
-  }
-
-  for (const item of toUpdate) {
+  const toUpdate = normalizedGroups.filter((item) => {
     const current = currentByGroupNo.get(item.group_no)
-    if (!current?.id) continue
+    if (!current) return false
+    const currentMemberUserIds = parseMaybeJsonArray(current.member_user_ids)
+      .map((userId) => String(userId || '').trim())
+      .filter(Boolean)
+      .sort()
+    const nextMemberUserIds = [...item.member_user_ids].sort()
+    return (
+      String(current.group_name || '') !== item.group_name ||
+      currentMemberUserIds.join('::') !== nextMemberUserIds.join('::')
+    )
+  })
 
+  const writeTasks = [
+    ...toRemove.map((item) => ({ type: 'remove', item })),
+    ...toCreate.map((item) => ({ type: 'create', item })),
+    ...toUpdate.map((item) => ({ type: 'update', item })),
+  ]
+
+  await runWriteBatches(writeTasks, async ({ type, item }) => {
+    if (type === 'remove') {
+      if (!item?.id) return
+      const record = table.getWithoutData(item.id)
+      record.set('enabled', false)
+      await record.update()
+      return
+    }
+
+    if (type === 'create') {
+      const record = table.create()
+      record.set({
+        tournament_id: id,
+        group_no: item.group_no,
+        group_name: item.group_name,
+        member_user_ids: serializeJsonArray(item.member_user_ids),
+        enabled: true,
+      })
+      await record.save()
+      return
+    }
+
+    const current = currentByGroupNo.get(item.group_no)
+    if (!current?.id) return
     const record = table.getWithoutData(current.id)
     record.set({
       group_name: item.group_name,
       member_user_ids: serializeJsonArray(item.member_user_ids),
     })
     await record.update()
-  }
+  })
 
   return normalizedGroups
 }
@@ -648,7 +690,7 @@ const normalizeAssignmentList = (assignments = []) =>
         item.user_id
     )
 
-export const listTournamentTeamAssignments = async (tournamentId) => {
+export const listTournamentTeamAssignments = async (tournamentId, options = {}) => {
   const id = String(tournamentId || '').trim()
   if (!id) return []
 
@@ -656,6 +698,8 @@ export const listTournamentTeamAssignments = async (tournamentId) => {
   const query = new BaaS.Query()
   query.compare('tournament_id', '=', id)
   query.compare('enabled', '=', true)
+  const roundNo = Number(options?.roundNo)
+  if (Number.isInteger(roundNo) && roundNo > 0) query.compare('round_no', '=', roundNo)
   const records = await findAll(table, query)
 
   return normalizeAssignmentList(records).sort((a, b) => {
@@ -671,12 +715,31 @@ export const listTournamentTeamAssignments = async (tournamentId) => {
 const buildAssignmentKey = (item) =>
   [item.round_no, item.group_no, item.event_code, item.event_no, item.slot_code].join('::')
 
-export const saveTournamentTeamAssignments = async ({ tournamentId, assignments }) => {
+export const saveTournamentTeamAssignments = async ({ tournamentId, assignments, scope }) => {
   const id = String(tournamentId || '').trim()
   if (!id) throw new Error('缺少赛事ID')
 
   const normalizedAssignments = normalizeAssignmentList(assignments)
   if (!normalizedAssignments.length) throw new Error('请至少保存 1 条排位记录')
+
+  const scopeRoundNo = Number(scope?.roundNo)
+  const scopeGroupNos = Array.from(
+    new Set(
+      (Array.isArray(scope?.groupNos) ? scope.groupNos : [])
+        .map((groupNo) => Number(groupNo))
+        .filter((groupNo) => Number.isInteger(groupNo) && groupNo > 0)
+    )
+  )
+  if (!Number.isInteger(scopeRoundNo) || scopeRoundNo < 1 || !scopeGroupNos.length) {
+    throw new Error('缺少排位保存范围')
+  }
+  if (
+    normalizedAssignments.some(
+      (item) => item.round_no !== scopeRoundNo || !scopeGroupNos.includes(item.group_no)
+    )
+  ) {
+    throw new Error('排位数据超出当前可编辑范围')
+  }
 
   const duplicateKey = normalizedAssignments.find(
     (item, index) =>
@@ -689,6 +752,8 @@ export const saveTournamentTeamAssignments = async ({ tournamentId, assignments 
   const query = new BaaS.Query()
   query.compare('tournament_id', '=', id)
   query.compare('enabled', '=', true)
+  query.compare('round_no', '=', scopeRoundNo)
+  query.in('group_no', scopeGroupNos)
   const currentRecords = await findAll(table, query)
 
   const currentByKey = new Map()
@@ -706,42 +771,50 @@ export const saveTournamentTeamAssignments = async ({ tournamentId, assignments 
   const toCreate = normalizedAssignments.filter(
     (item) => !currentByKey.has(buildAssignmentKey(item))
   )
-  const toUpdate = normalizedAssignments.filter((item) =>
-    currentByKey.has(buildAssignmentKey(item))
-  )
-
-  for (const item of toRemove) {
-    if (!item?.id) continue
-    const record = table.getWithoutData(item.id)
-    record.set('enabled', false)
-    await record.update()
-  }
-
-  for (const item of toCreate) {
-    const record = table.create()
-    record.set({
-      tournament_id: id,
-      round_no: item.round_no,
-      group_no: item.group_no,
-      event_code: item.event_code,
-      event_no: item.event_no,
-      slot_code: item.slot_code,
-      user_id: item.user_id,
-      enabled: true,
-    })
-    await record.save()
-  }
-
-  for (const item of toUpdate) {
+  const toUpdate = normalizedAssignments.filter((item) => {
     const current = currentByKey.get(buildAssignmentKey(item))
-    if (!current?.id) continue
+    if (!current?.id) return false
     const currentUserId = String(current?.user_id || '').trim()
-    if (currentUserId === item.user_id) continue
+    return currentUserId !== item.user_id
+  })
 
+  const writeTasks = [
+    ...toRemove.map((item) => ({ type: 'remove', item })),
+    ...toCreate.map((item) => ({ type: 'create', item })),
+    ...toUpdate.map((item) => ({ type: 'update', item })),
+  ]
+
+  await runWriteBatches(writeTasks, async ({ type, item }) => {
+    if (type === 'remove') {
+      if (!item?.id) return
+      const record = table.getWithoutData(item.id)
+      record.set('enabled', false)
+      await record.update()
+      return
+    }
+
+    if (type === 'create') {
+      const record = table.create()
+      record.set({
+        tournament_id: id,
+        round_no: item.round_no,
+        group_no: item.group_no,
+        event_code: item.event_code,
+        event_no: item.event_no,
+        slot_code: item.slot_code,
+        user_id: item.user_id,
+        enabled: true,
+      })
+      await record.save()
+      return
+    }
+
+    const current = currentByKey.get(buildAssignmentKey(item))
+    if (!current?.id) return
     const record = table.getWithoutData(current.id)
     record.set('user_id', item.user_id)
     await record.update()
-  }
+  })
 
   return normalizedAssignments
 }
@@ -773,7 +846,7 @@ const normalizeMatchScoreList = (scores = []) =>
         item.away_score >= 0
     )
 
-export const listTournamentTeamMatchScores = async (tournamentId) => {
+export const listTournamentTeamMatchScores = async (tournamentId, options = {}) => {
   const id = String(tournamentId || '').trim()
   if (!id) return []
 
@@ -781,6 +854,8 @@ export const listTournamentTeamMatchScores = async (tournamentId) => {
   const query = new BaaS.Query()
   query.compare('tournament_id', '=', id)
   query.compare('enabled', '=', true)
+  const roundNo = Number(options?.roundNo)
+  if (Number.isInteger(roundNo) && roundNo > 0) query.compare('round_no', '=', roundNo)
   const records = await findAll(table, query)
 
   return normalizeMatchScoreList(records).sort((a, b) => {
@@ -837,6 +912,189 @@ export const saveTournamentTeamMatchScore = async ({ tournamentId, score }) => {
   }
 
   return normalized
+}
+
+const buildSettlementMatchKey = (item) =>
+  [
+    Number(item.round_no),
+    String(item.event_code || ''),
+    Number(item.event_no || 1),
+    Number(item.home_group_no),
+    Number(item.away_group_no),
+  ].join('::')
+
+const buildSettlementSideKey = (roundNo, eventCode, eventNo, groupNo) =>
+  [Number(roundNo), String(eventCode || ''), Number(eventNo || 1), Number(groupNo)].join('::')
+
+const buildExpectedSettlementMatches = ({ tournament, groups, assignments }) => {
+  const matches = []
+  if (tournament.match_mode === 'random_mixed_rotate') {
+    const groupNos = [
+      ...new Set(assignments.map((item) => Number(item.group_no)).filter((item) => item > 0)),
+    ].sort((a, b) => a - b)
+    for (let index = 0; index + 1 < groupNos.length; index += 2) {
+      matches.push({
+        round_no: 1,
+        event_code: 'mixed_double',
+        event_no: 1,
+        home_group_no: groupNos[index],
+        away_group_no: groupNos[index + 1],
+      })
+    }
+    return matches
+  }
+
+  if (tournament.match_mode !== 'team') throw new Error('当前对局方式暂不支持统计结算')
+  const groupNos = groups.map((item) => Number(item.group_no)).filter((item) => item > 0)
+  const roundCount = Math.max(1, Number(tournament.team_config?.round_count || 1))
+  for (let roundNo = 1; roundNo <= roundCount; roundNo += 1) {
+    getTeamEventInstances(getTeamRoundEventCodes(tournament.team_config, roundNo)).forEach(
+      ({ eventCode, eventNo }) => {
+        for (let homeIndex = 0; homeIndex < groupNos.length; homeIndex += 1) {
+          for (let awayIndex = homeIndex + 1; awayIndex < groupNos.length; awayIndex += 1) {
+            matches.push({
+              round_no: roundNo,
+              event_code: eventCode,
+              event_no: eventNo,
+              home_group_no: groupNos[homeIndex],
+              away_group_no: groupNos[awayIndex],
+            })
+          }
+        }
+      }
+    )
+  }
+  return matches
+}
+
+export const settleTournamentStatistics = async (tournamentId) => {
+  const id = String(tournamentId || '').trim()
+  if (!id) throw new Error('缺少赛事ID')
+
+  const [tournament, groups, assignments, scores] = await Promise.all([
+    getTournamentDetail(id),
+    listTournamentTeamGroups(id),
+    listTournamentTeamAssignments(id),
+    listTournamentTeamMatchScores(id),
+  ])
+  if (!tournament.participants.length) throw new Error('当前赛事没有可结算的参赛人员')
+
+  const expectedMatches = buildExpectedSettlementMatches({ tournament, groups, assignments })
+  if (!expectedMatches.length) throw new Error('当前赛事没有可结算的对局')
+
+  const participantResultMap = new Map(
+    tournament.participants.map((item) => [
+      String(item.user_id),
+      { matchCount: 0, winCount: 0, lossCount: 0 },
+    ])
+  )
+  const assignmentSideMap = new Map()
+  assignments.forEach((item) => {
+    const key = buildSettlementSideKey(
+      item.round_no,
+      item.event_code,
+      item.event_no,
+      item.group_no
+    )
+    const userIds = assignmentSideMap.get(key) || new Set()
+    userIds.add(String(item.user_id || ''))
+    assignmentSideMap.set(key, userIds)
+  })
+  const scoreMap = new Map(scores.map((item) => [buildSettlementMatchKey(item), item]))
+
+  expectedMatches.forEach((match) => {
+    const score = scoreMap.get(buildSettlementMatchKey(match))
+    if (!score) throw new Error('存在未录入比分的对局，不能结算')
+    if (Number(score.home_score) === Number(score.away_score))
+      throw new Error('存在平分对局，请修正比分后再结算')
+
+    const homeUserIds = assignmentSideMap.get(
+      buildSettlementSideKey(match.round_no, match.event_code, match.event_no, match.home_group_no)
+    )
+    const awayUserIds = assignmentSideMap.get(
+      buildSettlementSideKey(match.round_no, match.event_code, match.event_no, match.away_group_no)
+    )
+    if (!homeUserIds?.size || !awayUserIds?.size) throw new Error('存在缺少出场人员的对局，不能结算')
+    const homeWon = Number(score.home_score) > Number(score.away_score)
+    ;[
+      { userIds: homeUserIds, won: homeWon },
+      { userIds: awayUserIds, won: !homeWon },
+    ].forEach(({ userIds, won }) => {
+      userIds.forEach((userId) => {
+        const result = participantResultMap.get(userId)
+        if (!result) throw new Error('排位中存在非参赛人员，不能结算')
+        result.matchCount += 1
+        if (won) result.winCount += 1
+        else result.lossCount += 1
+      })
+    })
+  })
+
+  const tournamentTable = new BaaS.TableObject(TOURNAMENT_TABLE)
+  const processingRecord = tournamentTable.getWithoutData(id)
+  processingRecord.set('settlement_status', 'processing')
+  await processingRecord.update()
+
+  const participantTable = new BaaS.TableObject(TOURNAMENT_PARTICIPANT_TABLE)
+  await runWriteBatches(tournament.participants, async (participant) => {
+    if (!participant.id) throw new Error('参赛记录缺少ID，不能结算')
+    const result = participantResultMap.get(String(participant.user_id))
+    const winRate = result.matchCount
+      ? Number(((result.winCount / result.matchCount) * 100).toFixed(2))
+      : 0
+    const record = participantTable.getWithoutData(participant.id)
+    record.set({
+      match_count: result.matchCount,
+      win_count: result.winCount,
+      loss_count: result.lossCount,
+      win_rate: winRate,
+      stats_settled: true,
+    })
+    await record.update()
+  })
+
+  const settledQuery = new BaaS.Query()
+  settledQuery.compare('enabled', '=', true)
+  settledQuery.compare('stats_settled', '=', true)
+  const settledParticipantRecords = await findAll(participantTable, settledQuery)
+  const affectedUserIds = new Set(tournament.participants.map((item) => String(item.user_id)))
+  const aggregateMap = new Map()
+  settledParticipantRecords.forEach((item) => {
+    const userId = String(item.user_id || '')
+    if (!affectedUserIds.has(userId)) return
+    const aggregate = aggregateMap.get(userId) || {
+      tournamentCount: 0,
+      matchCount: 0,
+      winCount: 0,
+    }
+    aggregate.tournamentCount += 1
+    aggregate.matchCount += Number(item.match_count || 0)
+    aggregate.winCount += Number(item.win_count || 0)
+    aggregateMap.set(userId, aggregate)
+  })
+  const currentStatsMap = await listUserStatsMap([...affectedUserIds])
+  await runWriteBatches([...affectedUserIds], async (userId) => {
+    const aggregate = aggregateMap.get(userId) || {
+      tournamentCount: 0,
+      matchCount: 0,
+      winCount: 0,
+    }
+    await upsertUserStats({
+      userId,
+      level: currentStatsMap[userId]?.level || '-',
+      tournamentCount: aggregate.tournamentCount,
+      matchCount: aggregate.matchCount,
+      winRate: aggregate.matchCount
+        ? Number(((aggregate.winCount / aggregate.matchCount) * 100).toFixed(2))
+        : 0,
+    })
+  })
+
+  const settledAt = Math.floor(Date.now() / 1000)
+  const completedRecord = tournamentTable.getWithoutData(id)
+  completedRecord.set({ settlement_status: 'completed', settled_at: settledAt })
+  await completedRecord.update()
+  return { settlement_status: 'completed', settled_at: settledAt }
 }
 
 export const listMyParticipatingTournaments = async (userId) => {
@@ -921,40 +1179,59 @@ export const updateTournamentParticipants = async ({ tournamentId, participants 
   const toRemove = currentRecords.filter(
     (item) => !nextByUserId.has(String(item?.user_id || '').trim())
   )
-  const toUpdate = participantList.filter((item) => currentByUserId.has(item.user_id))
-
-  for (const item of toRemove) {
-    if (!item?.id) continue
-    const record = participantTable.getWithoutData(item.id)
-    record.set('enabled', false)
-    await record.update()
-  }
-
-  for (const item of toAdd) {
-    const record = participantTable.create()
-    record.set({
-      tournament_id: id,
-      user_id: item.user_id,
-      nickname: item.nickname || item.user_id,
-      enabled: true,
-    })
-    await record.save()
-  }
-
-  for (const item of toUpdate) {
+  const toUpdate = participantList.filter((item) => {
     const current = currentByUserId.get(item.user_id)
-    if (!current?.id) continue
+    if (!current?.id) return false
     const currentNickname = String(current?.nickname || '').trim()
     const nextNickname = String(item.nickname || item.user_id).trim()
-    if (currentNickname === nextNickname) continue
+    return currentNickname !== nextNickname
+  })
 
+  const writeTasks = [
+    ...toRemove.map((item) => ({ type: 'remove', item })),
+    ...toAdd.map((item) => ({ type: 'add', item })),
+    ...toUpdate.map((item) => ({ type: 'update', item })),
+  ]
+
+  await runWriteBatches(writeTasks, async ({ type, item }) => {
+    if (type === 'remove') {
+      if (!item?.id) return
+      const record = participantTable.getWithoutData(item.id)
+      record.set('enabled', false)
+      await record.update()
+      return
+    }
+
+    if (type === 'add') {
+      const record = participantTable.create()
+      record.set({
+        tournament_id: id,
+        user_id: item.user_id,
+        nickname: item.nickname || item.user_id,
+        enabled: true,
+        match_count: 0,
+        win_count: 0,
+        loss_count: 0,
+        win_rate: 0,
+        stats_settled: false,
+      })
+      await record.save()
+      return
+    }
+
+    const current = currentByUserId.get(item.user_id)
+    if (!current?.id) return
     const record = participantTable.getWithoutData(current.id)
-    record.set('nickname', nextNickname)
+    record.set('nickname', String(item.nickname || item.user_id).trim())
     await record.update()
+  })
+
+  if (currentRecords.length !== participantList.length) {
+    const tournamentTable = new BaaS.TableObject(TOURNAMENT_TABLE)
+    const tournamentRecord = tournamentTable.getWithoutData(id)
+    tournamentRecord.set('participant_count', participantList.length)
+    await tournamentRecord.update()
   }
 
-  const tournamentTable = new BaaS.TableObject(TOURNAMENT_TABLE)
-  const tournamentRecord = tournamentTable.getWithoutData(id)
-  tournamentRecord.set('participant_count', participantList.length)
-  await tournamentRecord.update()
+  return participantList
 }

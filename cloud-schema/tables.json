@@ -60,6 +60,8 @@
           { "name": "stage", "type": "string", "description": "赛事阶段：participant_adjusting/team_configuring/grouping/rounds_in_progress/finished" },
           { "name": "current_round_no", "type": "number", "description": "当前轮次" },
           { "name": "current_round_state", "type": "string", "description": "轮次状态：waiting_lineup/lineup_submitted/playing/scoring/round_finished" },
+          { "name": "settlement_status", "type": "string", "description": "统计结算状态：pending/processing/completed" },
+          { "name": "settled_at", "type": "number", "description": "统计结算完成时间戳" },
           { "name": "team_group_count", "type": "number", "description": "团体赛分队组数" },
           { "name": "team_event_codes", "type": "string", "description": "团体项目编码数组（JSON 字符串）" },
           { "name": "team_round_count", "type": "number", "description": "团体赛轮数" },
@@ -79,7 +81,12 @@
           { "name": "tournament_id", "type": "string", "description": "赛事ID，对应 tournament.id" },
           { "name": "user_id", "type": "string", "description": "参与用户ID" },
           { "name": "nickname", "type": "string", "description": "参与用户昵称（冗余字段，便于展示）" },
-          { "name": "enabled", "type": "boolean", "description": "是否有效参与" }
+          { "name": "enabled", "type": "boolean", "description": "是否有效参与" },
+          { "name": "match_count", "type": "number", "description": "本赛事实际出场次数" },
+          { "name": "win_count", "type": "number", "description": "本赛事获胜场次" },
+          { "name": "loss_count", "type": "number", "description": "本赛事失利场次" },
+          { "name": "win_rate", "type": "number", "description": "本赛事个人胜率" },
+          { "name": "stats_settled", "type": "boolean", "description": "是否已完成个人统计结算" }
         ]
       }
     },

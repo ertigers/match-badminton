@@ -124,24 +124,31 @@ router.beforeEach(async (to) => {
   const authStore = useAuthStore()
   await authStore.restore()
 
+  const hasAdminNavigation =
+    authStore.isAdmin || authStore.hasPermission('admin') || authStore.hasPermission('admin-common')
+  const defaultRouteName = hasAdminNavigation ? 'home' : 'mine'
+
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+
+  if (to.name === 'home' && authStore.isAuthenticated && !hasAdminNavigation) {
+    return { name: 'mine' }
   }
 
   if (to.meta.requiresPermission) {
     await authStore.loadPermissions()
     const hasRoutePermission = authStore.hasPermission(to.meta.requiresPermission)
     if (!hasRoutePermission && !authStore.isAdmin) {
-      return { name: 'home' }
+      return { name: defaultRouteName }
     }
   }
 
   if ((to.name === 'login' || to.name === 'register') && authStore.isAuthenticated) {
-    return { name: 'home' }
+    return { name: defaultRouteName }
   }
 
   return true
 })
 
 export default router
-

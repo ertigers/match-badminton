@@ -15,6 +15,7 @@ import {
   listTournamentTeamGroups,
   MATCH_MODES,
   ROUND_STATES,
+  settleTournamentStatistics,
   saveTournamentTeamAssignments,
   saveTournamentTeamMatchScore,
   saveTournamentTeamGroups,
@@ -49,6 +50,7 @@ const savingTeamConfig = ref(false)
 const savingTeamGroups = ref(false)
 const savingTeamAssignments = ref(false)
 const savingLifecycle = ref(false)
+const settlingStatistics = ref(false)
 const matchupScoreDraft = ref({})
 const savingMatchScore = ref(false)
 const refreshingMatchups = ref(false)
@@ -61,6 +63,7 @@ const pageLoading = computed(
     savingTeamGroups.value ||
     savingTeamAssignments.value ||
     savingLifecycle.value ||
+    settlingStatistics.value ||
     savingMatchScore.value ||
     refreshingMatchups.value
 )
@@ -557,7 +560,7 @@ const onMatchScoreSubmit = ({ matchKey, homeScore, awayScore }) => {
           away_score: nextAway,
         },
       })
-      matchupScoreDraft.value[key] = { homeScore: nextHome, awayScore: nextAway }
+      await loadRoundMatchScores(roundNo)
       ElMessage.success('比分已入库')
     } catch (error) {
       showErrorMessage(error)
@@ -832,8 +835,31 @@ const buildScoreMap = (matchScores = [], roundNo) => {
   return scoreMap
 }
 
+const loadRoundMatchScores = async (roundNo) => {
+  const targetRoundNo = Number(roundNo || 0)
+  if (!detail.value?.id || targetRoundNo < 1) return
+  const matchScores = await listTournamentTeamMatchScores(detail.value.id, {
+    roundNo: targetRoundNo,
+  })
+  const nextScoreMap = { ...(matchupScoreDraft.value || {}) }
+  const roundPrefix = `${targetRoundNo}-`
+  Object.keys(nextScoreMap).forEach((key) => {
+    if (String(key).startsWith(roundPrefix)) delete nextScoreMap[key]
+  })
+  Object.assign(nextScoreMap, buildScoreMap(matchScores, targetRoundNo))
+  matchupScoreDraft.value = nextScoreMap
+}
+
 const loadTeamBusinessData = async () => {
   if (!isTeamMode.value || !detail.value?.id) return
+  if (currentStage.value === 'participant_adjusting') return
+  if (['team_configuring', 'grouping'].includes(currentStage.value)) {
+    const groups = await listTournamentTeamGroups(detail.value.id)
+    teamGroups.value = normalizeTeamGroups(groups, teamForm.value.groupCount)
+    rebuildAssignmentDraft([])
+    matchupScoreDraft.value = {}
+    return
+  }
   const [groups, assignments, matchScores] = await Promise.all([
     listTournamentTeamGroups(detail.value.id),
     listTournamentTeamAssignments(detail.value.id),
@@ -872,14 +898,7 @@ const onRefreshMatchups = async () => {
   if (roundNo < 1) return
   try {
     refreshingMatchups.value = true
-    const matchScores = await listTournamentTeamMatchScores(detail.value.id)
-    const nextScoreMap = { ...(matchupScoreDraft.value || {}) }
-    const roundPrefix = `${roundNo}-`
-    Object.keys(nextScoreMap).forEach((key) => {
-      if (String(key).startsWith(roundPrefix)) delete nextScoreMap[key]
-    })
-    Object.assign(nextScoreMap, buildScoreMap(matchScores, roundNo))
-    matchupScoreDraft.value = nextScoreMap
+    await loadRoundMatchScores(roundNo)
   } catch (error) {
     showErrorMessage(error)
   } finally {
@@ -890,10 +909,31 @@ const onRefreshMatchups = async () => {
 const setLifecycle = async (payload) => {
   try {
     savingLifecycle.value = true
-    await updateTournamentLifecycle({ tournamentId: detail.value?.id, ...payload })
-    await loadDetail()
+    const updated = await updateTournamentLifecycle({ tournamentId: detail.value?.id, ...payload })
+    if (!detail.value || !updated) return
+    detail.value = {
+      ...detail.value,
+      status: updated.status || detail.value.status,
+      stage: updated.stage || detail.value.stage,
+      current_round_no:
+        typeof updated.current_round_no === 'undefined'
+          ? detail.value.current_round_no
+          : Number(updated.current_round_no),
+      current_round_state: updated.current_round_state || detail.value.current_round_state,
+    }
   } finally {
     savingLifecycle.value = false
+  }
+}
+
+const settleStatistics = async () => {
+  try {
+    settlingStatistics.value = true
+    const settled = await settleTournamentStatistics(detail.value?.id)
+    detail.value = { ...detail.value, ...settled }
+    return settled
+  } finally {
+    settlingStatistics.value = false
   }
 }
 
@@ -967,14 +1007,14 @@ const onLifecycleAction = async (action) => {
     if (action === 'to_team_configuring') {
       if ((detail.value?.participant_count || 0) < 2)
         throw new Error('参赛人数不足，无法进入参数设置')
-      await onSaveParticipants()
+      await onSaveParticipants(true)
       await setLifecycle({ stage: 'team_configuring' })
       ElMessage.success('已进入团体赛参数设置阶段')
       return
     }
     if (action === 'to_grouping') {
       if (Number(teamMinPlayersPerGroup.value || 0) < 1) throw new Error('请先保存团体参数')
-      await onSaveTeamConfig()
+      await onSaveTeamConfig(true)
       await setLifecycle({ stage: 'grouping' })
       ElMessage.success('已进入分组成员阶段')
       return
@@ -998,7 +1038,7 @@ const onLifecycleAction = async (action) => {
       return
     }
     if (action === 'start_rounds') {
-      await onSaveTeamGroups()
+      await onSaveTeamGroups(true)
       validateGroups()
       await setLifecycle({
         stage: 'rounds_in_progress',
@@ -1009,7 +1049,7 @@ const onLifecycleAction = async (action) => {
       return
     }
     if (action === 'mark_lineup_submitted') {
-      await onSaveTeamAssignments()
+      await onSaveTeamAssignments(true)
       if (!hasCurrentRoundLineupCompleted()) throw new Error('当前轮排位未全部提交完成')
       await setLifecycle({ currentRoundState: 'playing' })
       ElMessage.success('当前轮排位已确认，并已开始对局计分')
@@ -1018,11 +1058,10 @@ const onLifecycleAction = async (action) => {
     if (action === 'finish_round') {
       const roundCount = Number(teamForm.value.roundCount || 1)
       const roundNo = Number(currentRoundNo.value || 1)
-      if (!hasAdminPermission.value) {
-        const unscoredMatchKeys = getUnscoredMatchKeys(roundNo)
-        if (unscoredMatchKeys.length) {
-          throw new Error(`当前轮还有 ${unscoredMatchKeys.length} 场对局未计分，不能完成本轮`)
-        }
+      await loadRoundMatchScores(roundNo)
+      const unscoredMatchKeys = getUnscoredMatchKeys(roundNo)
+      if (unscoredMatchKeys.length) {
+        throw new Error(`当前轮还有 ${unscoredMatchKeys.length} 场对局未计分，不能完成本轮`)
       }
       if (roundNo >= roundCount) {
         await setLifecycle({ currentRoundState: 'round_finished' })
@@ -1042,8 +1081,19 @@ const onLifecycleAction = async (action) => {
         cancelButtonText: '取消',
         type: 'warning',
       })
+      await settleStatistics()
       await setLifecycle({ stage: 'finished', currentRoundState: 'round_finished' })
       ElMessage.success('赛事已完成')
+      return
+    }
+    if (action === 'settle_statistics') {
+      await ElMessageBox.confirm('确认根据现有排位和比分补结算个人统计吗？', '补结算统计', {
+        confirmButtonText: '确认结算',
+        cancelButtonText: '取消',
+        type: 'warning',
+      })
+      await settleStatistics()
+      ElMessage.success('赛事统计已补结算')
     }
   } catch (error) {
     showErrorMessage(error)
@@ -1068,7 +1118,15 @@ const lifecycleActionButtons = computed(() => {
       return [{ key: 'mark_lineup_submitted', label: '确认排位并开始计分' }]
     }
     if (currentRoundState.value === 'playing') {
-      return [{ key: 'finish_round', label: '完成本轮', type: 'primary' }]
+      const unscoredCount = getUnscoredMatchKeys(currentRoundNo.value).length
+      return [
+        {
+          key: 'finish_round',
+          label: unscoredCount ? `完成本轮（还差 ${unscoredCount} 场）` : '完成本轮',
+          type: 'primary',
+          disabled: unscoredCount > 0,
+        },
+      ]
     }
     if (currentRoundState.value === 'round_finished') {
       const isLastRound =
@@ -1080,6 +1138,9 @@ const lifecycleActionButtons = computed(() => {
       ]
     }
   }
+  if (currentStage.value === 'finished' && detail.value?.settlement_status !== 'completed') {
+    return [{ key: 'settle_statistics', label: '补结算统计', type: 'warning' }]
+  }
   return []
 })
 
@@ -1090,7 +1151,7 @@ const toggleParticipant = (userId) => {
   else selectedParticipantIds.value.push(id)
 }
 
-const onSaveParticipants = async () => {
+const onSaveParticipants = async (throwOnError = false) => {
   try {
     if (!canManageParticipants.value) throw new Error('仅管理员或赛事创建者可修改参赛人员')
     savingParticipants.value = true
@@ -1101,13 +1162,25 @@ const onSaveParticipants = async () => {
         user_id: item.user_id || item.id,
         nickname: item.nickname || item.user_id || item.id,
       }))
-    await updateTournamentParticipants({
+    const savedParticipants = await updateTournamentParticipants({
       tournamentId: detail.value?.id,
       participants: selectedUsers,
     })
+    const currentParticipantMap = new Map(
+      (detail.value?.participants || []).map((item) => [String(item.user_id || ''), item])
+    )
+    detail.value = {
+      ...detail.value,
+      participant_count: savedParticipants.length,
+      participants: savedParticipants.map((item) => ({
+        id: currentParticipantMap.get(String(item.user_id))?.id || '',
+        user_id: item.user_id,
+        nickname: item.nickname,
+      })),
+    }
     ElMessage.success('参赛人员已更新')
-    await loadDetail()
   } catch (error) {
+    if (throwOnError) throw error
     showErrorMessage(error)
   } finally {
     savingParticipants.value = false
@@ -1136,7 +1209,7 @@ const onTeamScheduleModeChange = () => {
   if (teamForm.value.scheduleMode === 'per_round') syncRoundEventCodes(true)
 }
 
-const onSaveTeamConfig = async () => {
+const onSaveTeamConfig = async (throwOnError = false) => {
   try {
     if (!canEditTeamConfig.value) throw new Error('仅管理员或赛事创建者可保存团体参数')
     savingTeamConfig.value = true
@@ -1155,21 +1228,27 @@ const onSaveTeamConfig = async () => {
     ElMessage.success('团体赛参数已保存')
     onApplyTeamConfig()
   } catch (error) {
+    if (throwOnError) throw error
     showErrorMessage(error)
   } finally {
     savingTeamConfig.value = false
   }
 }
 
-const onSaveTeamGroups = async () => {
+const onSaveTeamGroups = async (throwOnError = false) => {
   try {
     if (!canManageTeamGroups.value) throw new Error('仅管理员或赛事创建者可操作分组成员')
     savingTeamGroups.value = true
     validateGroups()
-    await saveTournamentTeamGroups({ tournamentId: detail.value?.id, groups: teamGroups.value })
+    await saveTournamentTeamGroups({
+      tournamentId: detail.value?.id,
+      groups: teamGroups.value,
+    })
+    const serverGroups = await listTournamentTeamGroups(detail.value?.id)
+    teamGroups.value = normalizeTeamGroups(serverGroups, teamForm.value.groupCount)
     ElMessage.success('分组成员已保存')
-    await loadTeamBusinessData()
   } catch (error) {
+    if (throwOnError) throw error
     showErrorMessage(error)
   } finally {
     savingTeamGroups.value = false
@@ -1220,7 +1299,7 @@ const validateAssignments = (rows = []) => {
   })
 }
 
-const onSaveTeamAssignments = async () => {
+const onSaveTeamAssignments = async (throwOnError = false) => {
   try {
     if (!canEditTeamLineups.value) throw new Error('仅参赛人员、管理员或赛事创建者可保存轮次排位')
     savingTeamAssignments.value = true
@@ -1231,16 +1310,25 @@ const onSaveTeamAssignments = async () => {
         editableGroupNoSet.has(Number(row.group_no))
     )
     validateAssignments(scopedRows)
-    const assignmentsToSave = assignmentDraft.value.filter((item) =>
-      String(item.user_id || '').trim()
-    )
+    const roundNo = Number(currentEditableRoundNo.value)
     await saveTournamentTeamAssignments({
       tournamentId: detail.value?.id,
-      assignments: assignmentsToSave,
+      assignments: scopedRows,
+      scope: {
+        roundNo,
+        groupNos: [...editableGroupNoSet],
+      },
     })
+    const serverRoundAssignments = await listTournamentTeamAssignments(detail.value?.id, {
+      roundNo,
+    })
+    const otherRoundAssignments = assignmentDraft.value.filter(
+      (item) => Number(item.round_no) !== roundNo && String(item.user_id || '').trim()
+    )
+    rebuildAssignmentDraft([...otherRoundAssignments, ...serverRoundAssignments])
     ElMessage.success('团体排位已保存')
-    await loadTeamBusinessData()
   } catch (error) {
+    if (throwOnError) throw error
     showErrorMessage(error)
   } finally {
     savingTeamAssignments.value = false
@@ -1255,7 +1343,7 @@ onMounted(async () => {
 
 <template>
   <section v-loading.fullscreen.lock="pageLoading" class="detail-page">
-    <el-card shadow="never">
+    <el-card class="overview-card" shadow="never">
       <template #header>
         <div class="title">{{ detail?.name || '赛事详情' }}</div>
       </template>
@@ -1437,24 +1525,38 @@ onMounted(async () => {
     />
 
     <div v-if="isTeamMode" class="action-row">
-      <div v-if="!canOperateLifecycle" class="meta">仅管理员或赛事创建者可操作阶段变更</div>
-      <el-button
-        v-for="item in lifecycleActionButtons"
-        :key="item.key"
-        :type="item.type || 'primary'"
-        size="large"
-        :loading="savingLifecycle"
-        :disabled="!canOperateLifecycle"
-        class="action-btn"
-        :class="{
-          'action-btn--back': item.key === 'back_to_team_configuring',
-          'action-btn--main': item.key !== 'back_to_team_configuring',
-          'action-btn--single': lifecycleActionButtons.length === 1,
-        }"
-        @click="onLifecycleAction(item.key)"
-      >
-        {{ item.label }}
-      </el-button>
+      <template v-if="showTeamLineupsPanel && canEditTeamLineups && !canOperateLifecycle">
+        <el-button
+          type="primary"
+          size="large"
+          :loading="savingTeamAssignments"
+          class="action-btn action-btn--bottom-save"
+          @click="onSaveTeamAssignments"
+        >
+          保存轮次排位
+        </el-button>
+        <div class="lineup-save-hint">保存后请联系管理员或赛事创建者开启比赛</div>
+      </template>
+      <template v-else>
+        <div v-if="!canOperateLifecycle" class="meta">仅管理员或赛事创建者可操作阶段变更</div>
+        <el-button
+          v-for="item in lifecycleActionButtons"
+          :key="item.key"
+          :type="item.type || 'primary'"
+          size="large"
+          :loading="savingLifecycle || settlingStatistics"
+          :disabled="!canOperateLifecycle || item.disabled"
+          class="action-btn"
+          :class="{
+            'action-btn--back': item.key === 'back_to_team_configuring',
+            'action-btn--main': item.key !== 'back_to_team_configuring',
+            'action-btn--single': lifecycleActionButtons.length === 1,
+          }"
+          @click="onLifecycleAction(item.key)"
+        >
+          {{ item.label }}
+        </el-button>
+      </template>
     </div>
   </section>
 </template>
@@ -1466,8 +1568,8 @@ onMounted(async () => {
 }
 
 .title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 700;
 }
 
 .meta {
@@ -1477,9 +1579,11 @@ onMounted(async () => {
 }
 
 .summary-block {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed #ebeef5;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(120, 134, 161, 0.12);
+  border-radius: 13px;
+  background: #f8f9fd;
 }
 
 .summary-title {
@@ -1627,5 +1731,20 @@ onMounted(async () => {
 .action-btn--single {
   flex: 0 1 240px;
   width: min(100%, 240px);
+}
+
+.action-btn--bottom-save {
+  flex: 0 1 370px;
+  width: min(100%, 370px);
+  min-height: 48px;
+  font-size: 15px;
+}
+
+.lineup-save-hint {
+  width: 100%;
+  color: #7b8496;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
 }
 </style>

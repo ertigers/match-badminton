@@ -306,16 +306,17 @@ onMounted(async () => {
 <style scoped>
 .user-page {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .action-bar {
   display: flex;
   gap: 8px;
-  padding: 8px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #ebeef5;
+  padding: 10px;
+  border: 1px solid rgba(121, 135, 163, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 24px rgba(46, 64, 104, 0.07);
 }
 
 .action-btn {
@@ -338,7 +339,10 @@ onMounted(async () => {
 }
 
 .stats-card {
-  border-radius: 12px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 90% 0%, rgba(255, 255, 255, 0.24), transparent 30%),
+    linear-gradient(135deg, #607af2, #5e53c8);
 }
 
 .stats-row {
@@ -348,14 +352,15 @@ onMounted(async () => {
 }
 
 .stat-item {
-  border-radius: 10px;
-  padding: 10px;
-  background: #f7f8fa;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 11px 8px;
+  background: rgba(255, 255, 255, 0.1);
   text-align: center;
 }
 
 .stat-label {
-  color: #909399;
+  color: rgba(255, 255, 255, 0.72);
   font-size: 12px;
   text-align: center;
 }
@@ -364,16 +369,16 @@ onMounted(async () => {
   margin-top: 8px;
   font-size: 24px;
   font-weight: 600;
-  color: #303133;
+  color: #fff;
   text-align: center;
 }
 
 .stat-value--male {
-  color: #5f9cf8;
+  color: #dceaff;
 }
 
 .stat-value--female {
-  color: #f56c9a;
+  color: #ffe0ec;
 }
 
 .empty-wrap {
@@ -382,7 +387,11 @@ onMounted(async () => {
 
 .user-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+}
+
+.user-card {
+  border-radius: 17px;
 }
 
 .user-card__top {
@@ -410,9 +419,10 @@ onMounted(async () => {
 }
 
 .meta-item {
-  background: #f7f8fa;
-  border-radius: 8px;
-  padding: 6px;
+  border: 1px solid rgba(121, 135, 163, 0.1);
+  background: #f7f8fc;
+  border-radius: 10px;
+  padding: 8px 6px;
   min-width: 0;
 }
 

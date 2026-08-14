@@ -52,24 +52,26 @@ const goPermissions = () => {
   z-index: 15;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
   padding: 8px 14px 10px;
-  background: #fff;
-  border-bottom: 1px solid #ebeef5;
+  background: rgba(255, 255, 255, 0.88);
+  border-bottom: 1px solid rgba(125, 139, 165, 0.12);
+  backdrop-filter: blur(16px);
 }
 
 .subnav-btn {
   border: none;
-  border-radius: 10px;
-  padding: 9px 0;
+  border-radius: 12px;
+  padding: 10px 0;
   font-size: 13px;
-  background: #f5f7fa;
-  color: #606266;
+  background: #f4f6fb;
+  color: #70798b;
 }
 
 .subnav-btn--active {
-  color: #409eff;
-  background: #ecf5ff;
+  color: #425fe2;
+  background: linear-gradient(135deg, #eef2ff, #e6ebff);
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(79, 109, 245, 0.12);
 }
 </style>

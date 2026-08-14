@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { listMyCreatedTournaments, MATCH_MODES } from '../../api/tournament'
 import { useAuthStore } from '../../stores/auth'
 import { showErrorMessage } from '../../utils/error'
+import TournamentListPanel from './components/tournament-list-panel.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -40,23 +41,15 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="my-list-page" v-loading.fullscreen.lock="loading">
-    <el-card shadow="never">
-      <template #header>
-        <div class="title">我创建的比赛</div>
-      </template>
-      <div v-if="list.length" class="list-wrap">
-        <div v-for="item in list" :key="item.id" class="item-card" @click="toDetail(item.id)">
-          <div class="item-top">
-            <div class="name">{{ item.name }}</div>
-            <el-tag size="small">{{ item.status }}</el-tag>
-          </div>
-          <div class="meta">对局方式：{{ modeMap[item.match_mode] || item.match_mode || '-' }}</div>
-          <div class="meta">参与人数：{{ item.participant_count }}</div>
-        </div>
-      </div>
-      <el-empty v-else description="暂无创建比赛" />
-    </el-card>
+  <section v-loading.fullscreen.lock="loading" class="my-list-page">
+    <TournamentListPanel
+      title="我创建的比赛"
+      description="管理你发起的赛事与比赛进度"
+      empty-text="暂无创建比赛"
+      :list="list"
+      :mode-map="modeMap"
+      @select="toDetail"
+    />
   </section>
 </template>
 
@@ -100,4 +93,3 @@ onMounted(async () => {
   line-height: 1.6;
 }
 </style>
-

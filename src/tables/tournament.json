@@ -180,6 +180,18 @@
         "description": "轮次状态：waiting_lineup/lineup_submitted/playing/scoring/round_finished"
       },
       {
+        "name": "settlement_status",
+        "type": "string",
+        "default": "pending",
+        "description": "统计结算状态：pending/processing/completed"
+      },
+      {
+        "name": "settled_at",
+        "type": "number",
+        "default": 0,
+        "description": "统计结算完成时间戳"
+      },
+      {
         "name": "created_by",
         "type": "integer",
         "description": "created_by"

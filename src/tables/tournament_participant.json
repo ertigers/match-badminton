@@ -38,6 +38,36 @@
         "description": "是否有效参与"
       },
       {
+        "name": "match_count",
+        "type": "number",
+        "default": 0,
+        "description": "本赛事实际出场次数"
+      },
+      {
+        "name": "win_count",
+        "type": "number",
+        "default": 0,
+        "description": "本赛事获胜场次"
+      },
+      {
+        "name": "loss_count",
+        "type": "number",
+        "default": 0,
+        "description": "本赛事失利场次"
+      },
+      {
+        "name": "win_rate",
+        "type": "number",
+        "default": 0,
+        "description": "本赛事个人胜率"
+      },
+      {
+        "name": "stats_settled",
+        "type": "boolean",
+        "default": false,
+        "description": "是否已完成个人统计结算"
+      },
+      {
         "name": "created_by",
         "type": "integer",
         "description": "created_by"
