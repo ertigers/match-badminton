@@ -41,10 +41,10 @@ const onLogin = async () => {
   }
 }
 
-const toRegister = () => {
+/* const toRegister = () => {
   const redirect = route.query.redirect ? { redirect: route.query.redirect } : undefined
   router.push({ name: 'register', query: redirect })
-}
+} */
 
 onMounted(() => {
   window.addEventListener('resize', handleResize)
@@ -69,17 +69,29 @@ onBeforeUnmount(() => {
           <el-input v-model="loginFormModel.account" size="large" placeholder="请输入登录名" />
         </el-form-item>
         <el-form-item label="密码" prop="password">
-          <el-input v-model="loginFormModel.password" size="large" type="password" placeholder="请输入密码"  show-password />
+          <el-input
+            v-model="loginFormModel.password"
+            size="large"
+            type="password"
+            placeholder="请输入密码"
+            show-password
+          />
         </el-form-item>
-        <el-button type="primary" size="large" :loading="loginLoading" style="width: 100%" @click="onLogin">
+        <el-button
+          type="primary"
+          size="large"
+          :loading="loginLoading"
+          style="width: 100%"
+          @click="onLogin"
+        >
           登录
         </el-button>
       </el-form>
 
-      <div class="footer-actions">
+      <!-- <div class="footer-actions">
         <span class="hint">没有账号？</span>
         <el-button type="primary" link @click="toRegister">立即注册</el-button>
-      </div>
+      </div> -->
     </el-card>
   </div>
 </template>

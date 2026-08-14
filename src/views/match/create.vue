@@ -67,7 +67,9 @@ const onCreateTournament = async () => {
       mode === 'team'
         ? {
             groupCount: 2,
+            scheduleMode: 'uniform',
             eventCodes: ['mixed_double'],
+            roundEventCodes: [['mixed_double']],
             roundCount: 1,
             scoreTarget: 21,
           }
@@ -94,7 +96,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="create-page" v-loading.fullscreen.lock="pageLoading">
+  <section v-loading.fullscreen.lock="pageLoading" class="create-page">
     <el-card shadow="never">
       <template #header>
         <div class="title">创建比赛</div>
@@ -157,7 +159,9 @@ onMounted(async () => {
       </div>
     </el-card>
 
-    <el-button type="primary" :loading="creating" @click="onCreateTournament">创建并进入比赛</el-button>
+    <el-button type="primary" :loading="creating" @click="onCreateTournament"
+      >创建并进入比赛</el-button
+    >
   </section>
 </template>
 
@@ -289,4 +293,3 @@ onMounted(async () => {
   justify-content: center;
 }
 </style>
-

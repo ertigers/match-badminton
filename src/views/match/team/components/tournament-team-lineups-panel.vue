@@ -31,19 +31,24 @@
             <div class="lineup-rows">
               <div
                 v-for="row in getRowsByRoundGroup(currentRoundNo, group.group_no)"
-                :key="`${currentRoundNo}-${group.group_no}-${row.event_code}-${row.slot_code}`"
+                :key="`${currentRoundNo}-${group.group_no}-${row.event_code}-${row.event_no}-${row.slot_code}`"
                 class="lineup-row"
               >
                 <div class="lineup-label">
-                  {{ eventLabelMap[row.event_code] || row.event_code }} ·
+                  {{ getEventLabel(row.event_code, row.event_no, currentRoundNo) }} ·
                   {{ slotLabelMap[row.slot_code] || row.slot_code }}
                 </div>
-                <el-radio-group :model-value="row.user_id" :disabled="!canEditTeamLineups" class="lineup-user-grid">
+                <el-radio-group
+                  :model-value="row.user_id"
+                  :disabled="!canEditTeamLineups"
+                  class="lineup-user-grid"
+                >
                   <el-radio
                     v-for="item in getLineupMemberOptions(
                       currentRoundNo,
                       group.group_no,
                       row.event_code,
+                      row.event_no,
                       row.slot_code,
                       row.user_id
                     )"
@@ -68,7 +73,6 @@
         <el-empty v-else description="你当前没有可编辑的分组排位" />
       </div>
     </div>
-
   </el-card>
 </template>
 
@@ -82,18 +86,21 @@ const props = defineProps({
   currentRoundNo: { type: Number, default: 1 },
   editableGroupNos: { type: Array, default: () => [] },
   getRowsByRoundGroup: { type: Function, required: true },
-  eventLabelMap: { type: Object, required: true },
+  getEventLabel: { type: Function, required: true },
   slotLabelMap: { type: Object, required: true },
   getLineupMemberOptions: { type: Function, required: true },
   savingTeamAssignments: { type: Boolean, default: false },
 })
 
-const editableGroupNoSet = computed(() => new Set((props.editableGroupNos || []).map((item) => Number(item))))
+const editableGroupNoSet = computed(
+  () => new Set((props.editableGroupNos || []).map((item) => Number(item)))
+)
 
 const editableGroups = computed(() =>
   (props.teamGroups || []).filter((group) => editableGroupNoSet.value.has(Number(group.group_no)))
 )
-const getGenderLabel = (gender) => (Number(gender) === 1 ? '男' : Number(gender) === 2 ? '女' : '未知')
+const getGenderLabel = (gender) =>
+  Number(gender) === 1 ? '男' : Number(gender) === 2 ? '女' : '未知'
 const getGenderClass = (gender) => {
   if (Number(gender) === 1) return 'lineup-user-gender--male'
   if (Number(gender) === 2) return 'lineup-user-gender--female'
@@ -165,13 +172,13 @@ defineEmits(['save-assignments'])
 
 .lineup-row {
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
 }
 
 .lineup-label {
   font-size: 12px;
+  font-weight: 500;
   color: #606266;
 }
 

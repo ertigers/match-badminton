@@ -19,6 +19,7 @@ pnpm dev
 ```bash
 VITE_MINAPP_CLIENT_ID=你的ClientID
 VITE_ADMIN_USER_IDS=管理员用户ID1,管理员用户ID2
+admin123
 ```
 
 ## 知晓云后台准备

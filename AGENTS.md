@@ -85,11 +85,13 @@
 
 ### 9.2 团体赛关键参数定义
 - 分队组数：team_group_count
-- 团体项目（多选）：男双、混双、女双、男单、女单
-- 每组人数：由项目自动推导（双打=2，单打=1，总和为每组最少人数）
+- 项目配置方式：team_event_schedule_mode（uniform=所有轮次相同，per_round=每轮单独设置）
+- 统一项目：team_event_codes；逐轮项目：team_round_event_codes（二维 JSON 数组）
+- 团体项目：男双、混双、女双、男单、女单；同一轮允许单个项目重复多场
+- 每组名单：按所有轮次中男性最大需求 + 女性最大需求推导；双打每场 2 人、单打每场 1 人
 - 轮数：round_count
 - 对局分值：score_target（15 / 21 / 31）
-- 约束：分组成员数、男女人数都受团体参数控制。
+- 约束：分组成员数、男女人数都受全部轮次的项目配置控制；单轮未上场成员允许轮休。
 
 ### 9.3 生命周期阶段（stage）与轮次状态（status）
 - stage 只描述赛事大阶段，status（或 round_state）只描述当前轮次执行态，二者不混用。
@@ -132,6 +134,7 @@
 - 字段：tournament_id、round_no、event_code、home_group_no、away_group_no、home_score、away_score、enabled。
 - 前端 API（src/api/tournament.js）：listTournamentTeamMatchScores(tournamentId)、saveTournamentTeamMatchScore({ tournamentId, score })。
 - 详情页流程：进入团体业务数据加载时拉取比分草稿，确认计分后写库并同步本地草稿。
+- 重复项目区分字段：tournament_team_assignment.event_no、tournament_team_match_score.event_no（同轮同项目从 1 开始）。
 
 ### 9.10 实施注意事项
 - 知晓云建表 JSON 必须严格匹配 table.json 规范，字段类型和默认值必须合法。

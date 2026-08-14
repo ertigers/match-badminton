@@ -18,6 +18,21 @@
       </div>
     </template>
 
+    <div class="roster-requirement">
+      <div>
+        每组固定名单：{{ teamRosterRequirement.total || 0 }} 人（男
+        {{ teamRosterRequirement.male || 0 }} / 女 {{ teamRosterRequirement.female || 0 }}）
+      </div>
+      <div
+        v-for="item in teamRosterRequirement.roundRequirements || []"
+        :key="item.roundNo"
+        class="round-requirement"
+      >
+        第 {{ item.roundNo }} 轮上场 {{ item.total }} 人（男 {{ item.male }} / 女
+        {{ item.female }}）
+      </div>
+    </div>
+
     <div class="team-groups">
       <div v-for="group in teamGroups" :key="group.group_no" class="group-card">
         <div class="group-title-row">
@@ -76,6 +91,7 @@ const props = defineProps({
   canManageTeamGroups: { type: Boolean, default: false },
   getAssignableParticipantOptions: { type: Function, required: true },
   getGenderLabel: { type: Function, required: true },
+  teamRosterRequirement: { type: Object, default: () => ({ roundRequirements: [] }) },
   savingTeamGroups: { type: Boolean, default: false },
 })
 
@@ -114,6 +130,20 @@ defineEmits(['group-members-change', 'save-groups'])
 .team-groups {
   display: grid;
   gap: 10px;
+}
+
+.roster-requirement {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f5f7fa;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.round-requirement {
+  color: #909399;
 }
 
 .group-card {

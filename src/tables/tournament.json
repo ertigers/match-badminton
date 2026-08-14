@@ -1,15 +1,9 @@
 {
   "name": "tournament",
   "description": "赛事主表",
-  "row_read_perm": [
-    "user:*"
-  ],
-  "row_write_perm": [
-    "user:*"
-  ],
-  "write_perm": [
-    "user:*"
-  ],
+  "row_read_perm": ["user:*"],
+  "row_write_perm": ["user:*"],
+  "write_perm": ["user:*"],
   "schema": {
     "fields": [
       {
@@ -54,7 +48,37 @@
           "rules": [],
           "required": false
         },
-        "description": "团体项目编码数组（JSON 字符串）"
+        "description": "统一配置模式的团体项目编码数组（JSON 字符串，允许重复项目）"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "team_event_schedule_mode",
+        "type": "string",
+        "default": "uniform",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "团体项目配置模式：uniform/per_round"
+      },
+      {
+        "acl": {
+          "clientVisible": true,
+          "clientReadOnly": false,
+          "creatorVisible": false
+        },
+        "name": "team_round_event_codes",
+        "type": "string",
+        "default": "[]",
+        "constraints": {
+          "rules": [],
+          "required": false
+        },
+        "description": "逐轮团体项目编码二维数组（JSON 字符串，允许重复项目）"
       },
       {
         "acl": {

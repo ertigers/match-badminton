@@ -60,6 +60,7 @@ const isTournamentCreator = computed(
     String(detail.value?.created_by_user_id || '') === currentUserId.value
 )
 const hasAdminPermission = computed(() => authStore.isAdmin || authStore.hasPermission('admin'))
+const hasAdminCommonPermission = computed(() => authStore.hasPermission('admin-common'))
 const hasManagerPermission = computed(() => hasAdminPermission.value || isTournamentCreator.value)
 
 const currentStage = computed(() => {
@@ -129,7 +130,9 @@ const gamesPerPlayer = ref(0)
 
 const isParticipantUser = computed(() => participantUserIdSet.value.has(currentUserId.value))
 const canManageParticipants = computed(() => hasManagerPermission.value)
-const canOperateLifecycle = computed(() => hasManagerPermission.value)
+const canOperateLifecycle = computed(
+  () => hasManagerPermission.value || hasAdminCommonPermission.value
+)
 const canRecordScore = computed(() => hasManagerPermission.value || isParticipantUser.value)
 
 const getUserLabel = (userId) =>

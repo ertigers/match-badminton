@@ -52,6 +52,11 @@ export const TEAM_EVENT_OPTIONS = [
 
 export const TEAM_SCORE_TARGET_OPTIONS = [15, 21, 31]
 
+export const TEAM_EVENT_SCHEDULE_MODES = [
+  { value: 'uniform', label: '所有轮次使用相同项目' },
+  { value: 'per_round', label: '每轮单独设置项目' },
+]
+
 export const TOURNAMENT_STAGES = [
   'participant_adjusting',
   'team_configuring',
@@ -60,11 +65,7 @@ export const TOURNAMENT_STAGES = [
   'finished',
 ]
 
-export const ROUND_STATES = [
-  'waiting_lineup',
-  'playing',
-  'round_finished',
-]
+export const ROUND_STATES = ['waiting_lineup', 'playing', 'round_finished']
 
 export const MATCH_MODES = [
   {
@@ -109,7 +110,7 @@ const parseMaybeJsonArray = (value) => {
     try {
       const parsed = JSON.parse(text)
       return Array.isArray(parsed) ? parsed : []
-    } catch (error) {
+    } catch {
       return text
         .split(',')
         .map((item) => item.trim())
@@ -122,13 +123,34 @@ const parseMaybeJsonArray = (value) => {
 const normalizeTeamEventCodes = (eventCodes) => {
   const rawList = parseMaybeJsonArray(eventCodes)
   if (!Array.isArray(rawList)) return []
-  return Array.from(
-    new Set(
-      rawList
-        .map((item) => String(item || '').trim())
-        .filter((item) => TEAM_EVENT_CODE_SET.has(item))
-    )
-  )
+  return rawList
+    .map((item) => String(item || '').trim())
+    .filter((item) => TEAM_EVENT_CODE_SET.has(item))
+}
+
+export const getTeamEventLabel = (eventCode) => {
+  const code = String(eventCode || '').trim()
+  return TEAM_EVENT_OPTIONS.find((item) => item.code === code)?.label || code
+}
+
+export const getTeamEventInstances = (eventCodes) => {
+  const normalizedEventCodes = normalizeTeamEventCodes(eventCodes)
+  const totalMap = normalizedEventCodes.reduce((result, code) => {
+    result.set(code, Number(result.get(code) || 0) + 1)
+    return result
+  }, new Map())
+  const occurrenceMap = new Map()
+
+  return normalizedEventCodes.map((eventCode) => {
+    const eventNo = Number(occurrenceMap.get(eventCode) || 0) + 1
+    occurrenceMap.set(eventCode, eventNo)
+    const repeated = Number(totalMap.get(eventCode) || 0) > 1
+    return {
+      eventCode,
+      eventNo,
+      label: `${getTeamEventLabel(eventCode)}${repeated ? ` ${eventNo}` : ''}`,
+    }
+  })
 }
 
 export const calculateTeamMinPlayersPerGroup = (eventCodes) => {
@@ -152,32 +174,114 @@ export const calculateTeamGenderRequirementPerGroup = (eventCodes) => {
   )
 }
 
+const normalizeTeamScheduleMode = (value) =>
+  String(value || '') === 'per_round' ? 'per_round' : 'uniform'
+
+const normalizeRoundEventCodes = (roundEventCodes, roundCount) => {
+  const source = Array.isArray(roundEventCodes) ? roundEventCodes : []
+  return Array.from({ length: roundCount }, (_, index) =>
+    normalizeTeamEventCodes(source[index] || [])
+  )
+}
+
+export const getTeamRoundEventCodes = (teamConfig, roundNo) => {
+  const roundCount = Math.max(1, Number(teamConfig?.roundCount || teamConfig?.round_count || 1))
+  const targetRoundNo = Math.min(roundCount, Math.max(1, Number(roundNo || 1)))
+  const scheduleMode = normalizeTeamScheduleMode(
+    teamConfig?.scheduleMode || teamConfig?.schedule_mode
+  )
+  if (scheduleMode === 'per_round') {
+    const roundEventCodes = normalizeRoundEventCodes(
+      teamConfig?.roundEventCodes || teamConfig?.round_event_codes || [],
+      roundCount
+    )
+    return roundEventCodes[targetRoundNo - 1] || []
+  }
+  return normalizeTeamEventCodes(teamConfig?.eventCodes || teamConfig?.event_codes || [])
+}
+
+export const calculateTeamRosterRequirement = (teamConfig = {}) => {
+  const roundCount = Math.max(1, Number(teamConfig?.roundCount || teamConfig?.round_count || 1))
+  let male = 0
+  let female = 0
+  const roundRequirements = []
+
+  for (let roundNo = 1; roundNo <= roundCount; roundNo += 1) {
+    const eventCodes = getTeamRoundEventCodes(teamConfig, roundNo)
+    const genderRequirement = calculateTeamGenderRequirementPerGroup(eventCodes)
+    const total = calculateTeamMinPlayersPerGroup(eventCodes)
+    male = Math.max(male, genderRequirement.male)
+    female = Math.max(female, genderRequirement.female)
+    roundRequirements.push({ roundNo, total, ...genderRequirement })
+  }
+
+  return {
+    total: male + female,
+    male,
+    female,
+    roundRequirements,
+  }
+}
+
 const normalizeTeamConfig = (teamConfig = {}) => {
   const groupCount = Number(teamConfig?.groupCount || teamConfig?.team_group_count || 2)
   const roundCount = Number(teamConfig?.roundCount || teamConfig?.team_round_count || 1)
   const scoreTarget = Number(teamConfig?.scoreTarget || teamConfig?.team_score_target || 21)
-  const eventCodes = normalizeTeamEventCodes(teamConfig?.eventCodes || teamConfig?.team_event_codes || [])
+  const scheduleMode = normalizeTeamScheduleMode(
+    teamConfig?.scheduleMode || teamConfig?.schedule_mode || teamConfig?.team_event_schedule_mode
+  )
+  const eventCodes = normalizeTeamEventCodes(
+    teamConfig?.eventCodes || teamConfig?.event_codes || teamConfig?.team_event_codes || []
+  )
+  const roundEventCodes = normalizeRoundEventCodes(
+    teamConfig?.roundEventCodes ||
+      teamConfig?.round_event_codes ||
+      teamConfig?.team_round_event_codes ||
+      [],
+    roundCount
+  )
 
   if (groupCount < 2 || !Number.isInteger(groupCount)) throw new Error('分队组数至少为 2 组')
   if (roundCount < 1 || !Number.isInteger(roundCount)) throw new Error('轮数至少为 1 轮')
-  if (!TEAM_SCORE_TARGET_OPTIONS.includes(scoreTarget)) throw new Error('对局分值仅支持 15 / 21 / 31')
-  if (!eventCodes.length) throw new Error('请至少选择 1 个团体项目')
+  if (!TEAM_SCORE_TARGET_OPTIONS.includes(scoreTarget))
+    throw new Error('对局分值仅支持 15 / 21 / 31')
+  if (scheduleMode === 'uniform' && !eventCodes.length) throw new Error('请至少选择 1 个团体项目')
+  if (scheduleMode === 'per_round') {
+    const emptyRoundIndex = roundEventCodes.findIndex((codes) => !codes.length)
+    if (emptyRoundIndex >= 0)
+      throw new Error(`请至少为第 ${emptyRoundIndex + 1} 轮选择 1 个团体项目`)
+  }
+
+  const effectiveRoundEventCodes =
+    scheduleMode === 'per_round'
+      ? roundEventCodes
+      : Array.from({ length: roundCount }, () => [...eventCodes])
+  const rosterRequirement = calculateTeamRosterRequirement({
+    scheduleMode,
+    eventCodes,
+    roundEventCodes: effectiveRoundEventCodes,
+    roundCount,
+  })
 
   return {
     groupCount,
     roundCount,
     scoreTarget,
+    scheduleMode,
     eventCodes,
-    minPlayersPerGroup: calculateTeamMinPlayersPerGroup(eventCodes),
+    roundEventCodes: effectiveRoundEventCodes,
+    minPlayersPerGroup: rosterRequirement.total,
+    rosterRequirement,
   }
 }
 
 export const getTeamEventSlots = (eventCodes) =>
-  normalizeTeamEventCodes(eventCodes).flatMap((code) => {
-    const event = TEAM_EVENT_OPTIONS.find((item) => item.code === code)
+  getTeamEventInstances(eventCodes).flatMap(({ eventCode, eventNo }) => {
+    const event = TEAM_EVENT_OPTIONS.find((item) => item.code === eventCode)
     if (!event) return []
     return (event.slots || []).map((slotCode) => ({
-      eventCode: code,
+      eventCode,
+      eventNo,
       slotCode,
     }))
   })
@@ -199,9 +303,13 @@ const normalizeRoundState = (state) => {
 
 const mapTournamentSchemaError = (error) => {
   const message = String(error?.message || error?.error_msg || '')
-  if (!message.includes('Unexpected value of field') && !message.includes('do not match the schema')) return error
+  if (
+    !message.includes('Unexpected value of field') &&
+    !message.includes('do not match the schema')
+  )
+    return error
   return new Error(
-    `赛事表字段与请求不匹配：${message}。请在知晓云 tournament 表确认以下字段存在且类型正确：team_group_count(number)、team_round_count(number)、team_score_target(number)、team_min_players_per_group(number)、team_event_codes(string)、stage(string)、current_round_no(number)、current_round_state(string)。`
+    `赛事表字段与请求不匹配：${message}。请在知晓云 tournament 表确认以下字段存在且类型正确：team_group_count(number)、team_round_count(number)、team_score_target(number)、team_min_players_per_group(number)、team_event_codes(string)、team_event_schedule_mode(string)、team_round_event_codes(string)、stage(string)、current_round_no(number)、current_round_state(string)。`
   )
 }
 
@@ -238,7 +346,13 @@ const mapTournamentRecord = (item) => ({
   updated_at: item?.updated_at || '',
 })
 
-export const createTournament = async ({ name, matchMode, participants, creatorUserId, teamConfig }) => {
+export const createTournament = async ({
+  name,
+  matchMode,
+  participants,
+  creatorUserId,
+  teamConfig,
+}) => {
   const tournamentName = String(name || '').trim()
   const mode = String(matchMode || '').trim()
   const participantList = normalizeParticipants(participants)
@@ -262,6 +376,8 @@ export const createTournament = async ({ name, matchMode, participants, creatorU
     created_by_user_id: String(creatorUserId || '').trim(),
     team_group_count: normalizedTeamConfig?.groupCount || null,
     team_event_codes: serializeJsonArray(normalizedTeamConfig?.eventCodes || []),
+    team_event_schedule_mode: normalizedTeamConfig?.scheduleMode || null,
+    team_round_event_codes: serializeJsonArray(normalizedTeamConfig?.roundEventCodes || []),
     team_round_count: normalizedTeamConfig?.roundCount || null,
     team_score_target: normalizedTeamConfig?.scoreTarget || null,
     team_min_players_per_group: normalizedTeamConfig?.minPlayersPerGroup || null,
@@ -325,6 +441,11 @@ export const getTournamentDetail = async (id) => {
     team_config: {
       group_count: Number(tournament.team_group_count || 0),
       event_codes: normalizeTeamEventCodes(tournament.team_event_codes || ''),
+      schedule_mode: normalizeTeamScheduleMode(tournament.team_event_schedule_mode),
+      round_event_codes: normalizeRoundEventCodes(
+        parseMaybeJsonArray(tournament.team_round_event_codes || ''),
+        Math.max(1, Number(tournament.team_round_count || 1))
+      ),
       round_count: Number(tournament.team_round_count || 0),
       score_target: Number(tournament.team_score_target || 0),
       min_players_per_group: Number(tournament.team_min_players_per_group || 0),
@@ -347,6 +468,8 @@ export const updateTournamentTeamConfig = async ({ tournamentId, teamConfig }) =
   record.set({
     team_group_count: normalizedConfig.groupCount,
     team_event_codes: serializeJsonArray(normalizedConfig.eventCodes),
+    team_event_schedule_mode: normalizedConfig.scheduleMode,
+    team_round_event_codes: serializeJsonArray(normalizedConfig.roundEventCodes),
     team_round_count: normalizedConfig.roundCount,
     team_score_target: normalizedConfig.scoreTarget,
     team_min_players_per_group: normalizedConfig.minPlayersPerGroup,
@@ -372,7 +495,8 @@ export const updateTournamentLifecycle = async ({
   const payload = {}
   if (typeof stage !== 'undefined') payload.stage = normalizeTournamentStage(stage)
   if (typeof currentRoundNo !== 'undefined') payload.current_round_no = Number(currentRoundNo || 0)
-  if (typeof currentRoundState !== 'undefined') payload.current_round_state = normalizeRoundState(currentRoundState)
+  if (typeof currentRoundState !== 'undefined')
+    payload.current_round_state = normalizeRoundState(currentRoundState)
   if (!Object.keys(payload).length) return null
 
   if (payload.stage === 'rounds_in_progress') {
@@ -508,6 +632,7 @@ const normalizeAssignmentList = (assignments = []) =>
       round_no: Number(item?.round_no),
       group_no: Number(item?.group_no),
       event_code: String(item?.event_code || '').trim(),
+      event_no: Math.max(1, Number(item?.event_no || 1)),
       slot_code: String(item?.slot_code || '').trim(),
       user_id: String(item?.user_id || '').trim(),
     }))
@@ -518,6 +643,7 @@ const normalizeAssignmentList = (assignments = []) =>
         Number.isInteger(item.group_no) &&
         item.group_no > 0 &&
         TEAM_EVENT_CODE_SET.has(item.event_code) &&
+        Number.isInteger(item.event_no) &&
         item.slot_code &&
         item.user_id
     )
@@ -535,16 +661,15 @@ export const listTournamentTeamAssignments = async (tournamentId) => {
   return normalizeAssignmentList(records).sort((a, b) => {
     if (a.round_no !== b.round_no) return a.round_no - b.round_no
     if (a.group_no !== b.group_no) return a.group_no - b.group_no
-    if (a.event_code !== b.event_code) return String(a.event_code).localeCompare(String(b.event_code))
+    if (a.event_code !== b.event_code)
+      return String(a.event_code).localeCompare(String(b.event_code))
+    if (a.event_no !== b.event_no) return a.event_no - b.event_no
     return String(a.slot_code).localeCompare(String(b.slot_code))
   })
 }
 
 const buildAssignmentKey = (item) =>
-  [item.round_no, item.group_no, item.event_code, item.slot_code].join('::')
-
-const buildMatchScoreKey = (item) =>
-  [item.round_no, item.event_code, item.home_group_no, item.away_group_no].join('::')
+  [item.round_no, item.group_no, item.event_code, item.event_no, item.slot_code].join('::')
 
 export const saveTournamentTeamAssignments = async ({ tournamentId, assignments }) => {
   const id = String(tournamentId || '').trim()
@@ -555,9 +680,10 @@ export const saveTournamentTeamAssignments = async ({ tournamentId, assignments 
 
   const duplicateKey = normalizedAssignments.find(
     (item, index) =>
-      normalizedAssignments.findIndex((x) => buildAssignmentKey(x) === buildAssignmentKey(item)) !== index
+      normalizedAssignments.findIndex((x) => buildAssignmentKey(x) === buildAssignmentKey(item)) !==
+      index
   )
-  if (duplicateKey) throw new Error('同轮次同分组同项目同位置存在重复记录')
+  if (duplicateKey) throw new Error('同轮次同分组同项目序号同位置存在重复记录')
 
   const table = new BaaS.TableObject(TOURNAMENT_TEAM_ASSIGNMENT_TABLE)
   const query = new BaaS.Query()
@@ -577,8 +703,12 @@ export const saveTournamentTeamAssignments = async ({ tournamentId, assignments 
   })
 
   const toRemove = currentRecords.filter((item) => !nextByKey.has(buildAssignmentKey(item)))
-  const toCreate = normalizedAssignments.filter((item) => !currentByKey.has(buildAssignmentKey(item)))
-  const toUpdate = normalizedAssignments.filter((item) => currentByKey.has(buildAssignmentKey(item)))
+  const toCreate = normalizedAssignments.filter(
+    (item) => !currentByKey.has(buildAssignmentKey(item))
+  )
+  const toUpdate = normalizedAssignments.filter((item) =>
+    currentByKey.has(buildAssignmentKey(item))
+  )
 
   for (const item of toRemove) {
     if (!item?.id) continue
@@ -594,6 +724,7 @@ export const saveTournamentTeamAssignments = async ({ tournamentId, assignments 
       round_no: item.round_no,
       group_no: item.group_no,
       event_code: item.event_code,
+      event_no: item.event_no,
       slot_code: item.slot_code,
       user_id: item.user_id,
       enabled: true,
@@ -620,6 +751,7 @@ const normalizeMatchScoreList = (scores = []) =>
     .map((item) => ({
       round_no: Number(item?.round_no),
       event_code: String(item?.event_code || '').trim(),
+      event_no: Math.max(1, Number(item?.event_no || 1)),
       home_group_no: Number(item?.home_group_no),
       away_group_no: Number(item?.away_group_no),
       home_score: Number(item?.home_score),
@@ -630,6 +762,7 @@ const normalizeMatchScoreList = (scores = []) =>
         Number.isInteger(item.round_no) &&
         item.round_no > 0 &&
         TEAM_EVENT_CODE_SET.has(item.event_code) &&
+        Number.isInteger(item.event_no) &&
         Number.isInteger(item.home_group_no) &&
         item.home_group_no > 0 &&
         Number.isInteger(item.away_group_no) &&
@@ -652,7 +785,9 @@ export const listTournamentTeamMatchScores = async (tournamentId) => {
 
   return normalizeMatchScoreList(records).sort((a, b) => {
     if (a.round_no !== b.round_no) return a.round_no - b.round_no
-    if (a.event_code !== b.event_code) return String(a.event_code).localeCompare(String(b.event_code))
+    if (a.event_code !== b.event_code)
+      return String(a.event_code).localeCompare(String(b.event_code))
+    if (a.event_no !== b.event_no) return a.event_no - b.event_no
     if (a.home_group_no !== b.home_group_no) return a.home_group_no - b.home_group_no
     return a.away_group_no - b.away_group_no
   })
@@ -671,6 +806,7 @@ export const saveTournamentTeamMatchScore = async ({ tournamentId, score }) => {
   query.compare('enabled', '=', true)
   query.compare('round_no', '=', normalized.round_no)
   query.compare('event_code', '=', normalized.event_code)
+  query.compare('event_no', '=', normalized.event_no)
   query.compare('home_group_no', '=', normalized.home_group_no)
   query.compare('away_group_no', '=', normalized.away_group_no)
   const currentRecords = await findAll(table, query)
@@ -690,6 +826,7 @@ export const saveTournamentTeamMatchScore = async ({ tournamentId, score }) => {
       tournament_id: id,
       round_no: normalized.round_no,
       event_code: normalized.event_code,
+      event_no: normalized.event_no,
       home_group_no: normalized.home_group_no,
       away_group_no: normalized.away_group_no,
       home_score: normalized.home_score,
@@ -714,9 +851,7 @@ export const listMyParticipatingTournaments = async (userId) => {
 
   const tournamentIds = Array.from(
     new Set(
-      participantRecords
-        .map((item) => String(item?.tournament_id || '').trim())
-        .filter(Boolean)
+      participantRecords.map((item) => String(item?.tournament_id || '').trim()).filter(Boolean)
     )
   )
   if (!tournamentIds.length) return []
@@ -783,7 +918,9 @@ export const updateTournamentParticipants = async ({ tournamentId, participants 
   })
 
   const toAdd = participantList.filter((item) => !currentByUserId.has(item.user_id))
-  const toRemove = currentRecords.filter((item) => !nextByUserId.has(String(item?.user_id || '').trim()))
+  const toRemove = currentRecords.filter(
+    (item) => !nextByUserId.has(String(item?.user_id || '').trim())
+  )
   const toUpdate = participantList.filter((item) => currentByUserId.has(item.user_id))
 
   for (const item of toRemove) {

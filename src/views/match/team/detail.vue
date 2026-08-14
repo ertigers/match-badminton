@@ -4,9 +4,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { listAllUsers } from '../../../api/admin'
 import {
-  calculateTeamGenderRequirementPerGroup,
-  calculateTeamMinPlayersPerGroup,
+  calculateTeamRosterRequirement,
+  getTeamEventInstances,
+  getTeamEventLabel,
   getTeamEventSlots,
+  getTeamRoundEventCodes,
   getTournamentDetail,
   listTournamentTeamAssignments,
   listTournamentTeamMatchScores,
@@ -16,6 +18,7 @@ import {
   saveTournamentTeamAssignments,
   saveTournamentTeamMatchScore,
   saveTournamentTeamGroups,
+  TEAM_EVENT_SCHEDULE_MODES,
   TEAM_EVENT_OPTIONS,
   TEAM_SCORE_TARGET_OPTIONS,
   TOURNAMENT_STAGES,
@@ -64,7 +67,9 @@ const pageLoading = computed(
 
 const teamForm = ref({
   groupCount: 2,
+  scheduleMode: 'uniform',
   eventCodes: ['mixed_double'],
+  roundEventCodes: [['mixed_double']],
   roundCount: 1,
   scoreTarget: 21,
 })
@@ -79,11 +84,6 @@ const slotLabelMap = {
   mixed_male: '混双男位',
   mixed_female: '混双女位',
 }
-const eventLabelMap = TEAM_EVENT_OPTIONS.reduce((result, item) => {
-  result[item.code] = item.label
-  return result
-}, {})
-
 const stageLabelMap = {
   participant_adjusting: '参赛人员调整',
   team_configuring: '团体赛参数设置',
@@ -151,12 +151,22 @@ const femaleCount = computed(
   () => enrichedParticipants.value.filter((item) => Number(item.gender) === 2).length
 )
 
-const teamMinPlayersPerGroup = computed(() =>
-  calculateTeamMinPlayersPerGroup(teamForm.value.eventCodes)
-)
-const teamGenderRequirementPerGroup = computed(() =>
-  calculateTeamGenderRequirementPerGroup(teamForm.value.eventCodes)
-)
+const teamRosterRequirement = computed(() => calculateTeamRosterRequirement(teamForm.value))
+const teamMinPlayersPerGroup = computed(() => teamRosterRequirement.value.total)
+const teamGenderRequirementPerGroup = computed(() => ({
+  male: teamRosterRequirement.value.male,
+  female: teamRosterRequirement.value.female,
+}))
+const getRoundEventInstances = (roundNo) =>
+  getTeamEventInstances(getTeamRoundEventCodes(teamForm.value, roundNo))
+const getEventDisplayLabel = (eventCode, eventNo = 1, roundNo = 1) => {
+  const instances = getRoundEventInstances(roundNo)
+  const matched = instances.find(
+    (item) =>
+      String(item.eventCode) === String(eventCode) && Number(item.eventNo) === Number(eventNo)
+  )
+  return matched?.label || getTeamEventLabel(eventCode)
+}
 
 const currentUserId = computed(() => String(authStore.user?.id || ''))
 const isTournamentCreator = computed(
@@ -165,6 +175,7 @@ const isTournamentCreator = computed(
     String(detail.value?.created_by_user_id || '') === currentUserId.value
 )
 const hasAdminPermission = computed(() => authStore.isAdmin || authStore.hasPermission('admin'))
+const hasAdminCommonPermission = computed(() => authStore.hasPermission('admin-common'))
 const hasManagerPermission = computed(() => hasAdminPermission.value || isTournamentCreator.value)
 const isParticipantUser = computed(() => participantUserIdSet.value.has(currentUserId.value))
 const currentEditableRoundNo = computed(() => Math.max(1, Number(currentRoundNo.value || 1)))
@@ -202,7 +213,9 @@ const canEditTeamLineups = computed(
     (hasManagerPermission.value || isParticipantUser.value) &&
     editableTeamGroupNos.value.length > 0
 )
-const canOperateLifecycle = computed(() => isTeamMode.value && hasManagerPermission.value)
+const canOperateLifecycle = computed(
+  () => isTeamMode.value && (hasManagerPermission.value || hasAdminCommonPermission.value)
+)
 const stageOrder = [
   'participant_adjusting',
   'team_configuring',
@@ -218,7 +231,7 @@ const showParticipantSummary = computed(() => currentStageIndex.value >= 0)
 const showParticipant = computed(() => currentStageIndex.value >= 1 && currentStageIndex.value <= 2)
 const showTeamConfigSummary = computed(() => isTeamMode.value && currentStageIndex.value >= 2)
 const showGroupSummary = computed(() => isTeamMode.value && currentStageIndex.value >= 3)
-const showParticipantsPanel = computed(() => currentStageIndex.value === 0 )
+const showParticipantsPanel = computed(() => currentStageIndex.value === 0)
 const showTeamConfigPanel = computed(() => currentStageIndex.value === 1)
 const showTeamGroupsPanel = computed(() => currentStageIndex.value === 2)
 const showTeamLineupsPanel = computed(
@@ -232,11 +245,21 @@ const showTeamMatchupsPanel = computed(() => {
   if (!['playing', 'round_finished'].includes(currentRoundState.value)) return false
   return isRoundLineupCompleted(currentRoundNo.value)
 })
+const formatEventCodes = (eventCodes) =>
+  getTeamEventInstances(eventCodes)
+    .map((item) => item.label)
+    .join(' / ')
 const teamConfigSummaryText = computed(() => {
-  const eventLabels = TEAM_EVENT_OPTIONS.filter((item) => teamForm.value.eventCodes.includes(item.code)).map(
-    (item) => item.label
-  )
-  return `分组 ${teamForm.value.groupCount} 组，项目 ${eventLabels.join(' / ') || '-'}，轮数 ${teamForm.value.roundCount}，分值 ${teamForm.value.scoreTarget}`
+  const modeText = teamForm.value.scheduleMode === 'per_round' ? '每轮单独配置' : '所有轮次相同'
+  const eventText =
+    teamForm.value.scheduleMode === 'per_round'
+      ? Array.from(
+          { length: Number(teamForm.value.roundCount || 1) },
+          (_, index) =>
+            `第${index + 1}轮 ${formatEventCodes(getTeamRoundEventCodes(teamForm.value, index + 1)) || '-'}`
+        ).join('；')
+      : formatEventCodes(teamForm.value.eventCodes) || '-'
+  return `分组 ${teamForm.value.groupCount} 组，${modeText}，${eventText}，分值 ${teamForm.value.scoreTarget}`
 })
 const groupSummaryList = computed(() =>
   teamGroups.value.map((group) => ({
@@ -261,15 +284,22 @@ const roundLineupSummaryList = computed(() => {
     const groups = previewTeamGroupNos.value.map((groupNo) => {
       const group = teamGroups.value.find((item) => Number(item.group_no) === Number(groupNo))
       const allRows = getRowsByRoundGroup(roundNo, groupNo)
-      const rows = teamForm.value.eventCodes.map((eventCode) => {
+      const rows = getRoundEventInstances(roundNo).map(({ eventCode, eventNo, label }) => {
         const slotOrder = getEventSlots(eventCode)
         const eventRows = allRows
-          .filter((item) => String(item.event_code) === String(eventCode))
-          .sort((a, b) => slotOrder.indexOf(String(a.slot_code)) - slotOrder.indexOf(String(b.slot_code)))
+          .filter(
+            (item) =>
+              String(item.event_code) === String(eventCode) &&
+              Number(item.event_no) === Number(eventNo)
+          )
+          .sort(
+            (a, b) =>
+              slotOrder.indexOf(String(a.slot_code)) - slotOrder.indexOf(String(b.slot_code))
+          )
         const memberNames = eventRows.map((item) => getUserLabel(item.user_id)).filter(Boolean)
         return {
-          key: [roundNo, groupNo, eventCode].join('::'),
-          text: `${eventLabelMap[eventCode] || eventCode}：${memberNames.join('+') || '-'}`,
+          key: [roundNo, groupNo, eventCode, eventNo].join('::'),
+          text: `${label}：${memberNames.join('+') || '-'}`,
         }
       })
       return {
@@ -282,11 +312,13 @@ const roundLineupSummaryList = computed(() => {
   })
 })
 const roundScoreSummaryList = computed(() => {
-  const eventCodes = Array.isArray(teamForm.value.eventCodes) ? teamForm.value.eventCodes : []
-  const groupNos = [...previewTeamGroupNos.value].map((item) => Number(item)).filter((item) => item > 0)
+  const groupNos = [...previewTeamGroupNos.value]
+    .map((item) => Number(item))
+    .filter((item) => item > 0)
   const scoreDraft = matchupScoreDraft.value || {}
 
   return visibleSummaryRoundNos.value.map((roundNo) => {
+    const eventInstances = getRoundEventInstances(roundNo)
     const groupMap = new Map()
     groupNos.forEach((groupNo) => {
       const group = teamGroups.value.find((item) => Number(item.group_no) === Number(groupNo))
@@ -298,10 +330,12 @@ const roundScoreSummaryList = computed(() => {
         totalScore: 0,
         totalConcededScore: 0,
         totalNetScore: 0,
-        eventStats: eventCodes.reduce((result, eventCode) => {
-          result[eventCode] = {
-            eventCode,
-            eventLabel: eventLabelMap[eventCode] || eventCode,
+        eventStats: eventInstances.reduce((result, event) => {
+          const eventKey = `${event.eventCode}::${event.eventNo}`
+          result[eventKey] = {
+            eventCode: event.eventCode,
+            eventNo: event.eventNo,
+            eventLabel: event.label,
             matches: 0,
             winPoints: 0,
             totalScore: 0,
@@ -314,12 +348,13 @@ const roundScoreSummaryList = computed(() => {
     })
 
     let roundScoredMatches = 0
-    eventCodes.forEach((eventCode) => {
+    eventInstances.forEach(({ eventCode, eventNo }) => {
+      const eventKey = `${eventCode}::${eventNo}`
       for (let homeIndex = 0; homeIndex < groupNos.length; homeIndex += 1) {
         for (let awayIndex = homeIndex + 1; awayIndex < groupNos.length; awayIndex += 1) {
           const homeGroupNo = groupNos[homeIndex]
           const awayGroupNo = groupNos[awayIndex]
-          const key = `${roundNo}-${eventCode}-${homeGroupNo}-${awayGroupNo}`
+          const key = `${roundNo}-${eventCode}-${eventNo}-${homeGroupNo}-${awayGroupNo}`
           const score = scoreDraft[key]
           const homeScore = Number(score?.homeScore)
           const awayScore = Number(score?.awayScore)
@@ -330,8 +365,8 @@ const roundScoreSummaryList = computed(() => {
           const awayGroup = groupMap.get(awayGroupNo)
           if (!homeGroup || !awayGroup) continue
 
-          const homeEvent = homeGroup.eventStats[eventCode]
-          const awayEvent = awayGroup.eventStats[eventCode]
+          const homeEvent = homeGroup.eventStats[eventKey]
+          const awayEvent = awayGroup.eventStats[eventKey]
           homeEvent.matches += 1
           awayEvent.matches += 1
           homeEvent.totalScore += homeScore
@@ -346,8 +381,8 @@ const roundScoreSummaryList = computed(() => {
 
     const groups = groupNos.map((groupNo) => {
       const group = groupMap.get(groupNo)
-      const events = eventCodes.map((eventCode) => {
-        const event = group.eventStats[eventCode]
+      const events = eventInstances.map(({ eventCode, eventNo }) => {
+        const event = group.eventStats[`${eventCode}::${eventNo}`]
         event.netScore = event.totalScore - event.concededScore
         return event
       })
@@ -385,7 +420,9 @@ const liveRankingList = computed(() => {
       if (!rankMap.has(groupNo)) {
         rankMap.set(groupNo, {
           groupNo,
-          groupName: teamGroups.value.find((item) => Number(item.group_no) === groupNo)?.group_name || `第${groupNo}组`,
+          groupName:
+            teamGroups.value.find((item) => Number(item.group_no) === groupNo)?.group_name ||
+            `第${groupNo}组`,
           totalWinPoints: 0,
           totalNetScore: 0,
           totalScore: 0,
@@ -420,53 +457,64 @@ const showRoundLineupSummary = computed(() => {
   return roundLineupSummaryList.value.length > 0
 })
 
-const getGenderLabel = (gender) => (Number(gender) === 1 ? '男' : Number(gender) === 2 ? '女' : '未知')
+const getGenderLabel = (gender) =>
+  Number(gender) === 1 ? '男' : Number(gender) === 2 ? '女' : '未知'
 const getGenderTagType = (gender) => {
   if (Number(gender) === 1) return 'primary'
   if (Number(gender) === 2) return 'danger'
   return 'info'
 }
 const getUserLabel = (userId) =>
-  participantOptions.value.find((item) => String(item.value) === String(userId))?.label || String(userId || '')
+  participantOptions.value.find((item) => String(item.value) === String(userId))?.label ||
+  String(userId || '')
 const getGroupLabel = (groupNo) =>
-  teamGroups.value.find((item) => Number(item.group_no) === Number(groupNo))?.group_name || `第 ${groupNo} 组`
+  teamGroups.value.find((item) => Number(item.group_no) === Number(groupNo))?.group_name ||
+  `第 ${groupNo} 组`
 const getEventSlots = (eventCode) =>
   TEAM_EVENT_OPTIONS.find((item) => item.code === String(eventCode))?.slots || []
-const getEventSideText = (roundNo, groupNo, eventCode) => {
-  const rows = getRowsByRoundGroup(roundNo, groupNo).filter((item) => String(item.event_code) === String(eventCode))
+const getEventSideText = (roundNo, groupNo, eventCode, eventNo) => {
+  const rows = getRowsByRoundGroup(roundNo, groupNo).filter(
+    (item) =>
+      String(item.event_code) === String(eventCode) && Number(item.event_no) === Number(eventNo)
+  )
   if (!rows.length) return '-'
   const slotOrder = getEventSlots(eventCode)
   const ordered = [...rows].sort(
     (a, b) => slotOrder.indexOf(String(a.slot_code)) - slotOrder.indexOf(String(b.slot_code))
   )
-  return ordered.map((item) => getUserLabel(item.user_id)).filter(Boolean).join('\n') || '-'
+  return (
+    ordered
+      .map((item) => getUserLabel(item.user_id))
+      .filter(Boolean)
+      .join('\n') || '-'
+  )
 }
 const currentRoundMatchups = computed(() => {
   const roundNo = Number(currentRoundNo.value || 0)
   if (roundNo < 1) return []
-  const groupNos = [...new Set(teamGroups.value.map((item) => Number(item.group_no)).filter((item) => item > 0))].sort(
-    (a, b) => a - b
-  )
+  const groupNos = [
+    ...new Set(teamGroups.value.map((item) => Number(item.group_no)).filter((item) => item > 0)),
+  ].sort((a, b) => a - b)
   if (groupNos.length < 2) return []
 
-  return teamForm.value.eventCodes.map((eventCode) => {
+  return getRoundEventInstances(roundNo).map(({ eventCode, eventNo, label }) => {
     const matches = []
     for (let homeIndex = 0; homeIndex < groupNos.length; homeIndex += 1) {
       for (let awayIndex = homeIndex + 1; awayIndex < groupNos.length; awayIndex += 1) {
         const homeGroupNo = groupNos[homeIndex]
         const awayGroupNo = groupNos[awayIndex]
         matches.push({
-          key: `${roundNo}-${eventCode}-${homeGroupNo}-${awayGroupNo}`,
+          key: `${roundNo}-${eventCode}-${eventNo}-${homeGroupNo}-${awayGroupNo}`,
           homeLabel: getGroupLabel(homeGroupNo),
           awayLabel: getGroupLabel(awayGroupNo),
-          homeValue: getEventSideText(roundNo, homeGroupNo, eventCode),
-          awayValue: getEventSideText(roundNo, awayGroupNo, eventCode),
+          homeValue: getEventSideText(roundNo, homeGroupNo, eventCode, eventNo),
+          awayValue: getEventSideText(roundNo, awayGroupNo, eventCode, eventNo),
         })
       }
     }
     return {
-      key: `event-${eventCode}`,
-      eventLabel: eventLabelMap[eventCode] || eventCode,
+      key: `event-${eventCode}-${eventNo}`,
+      eventLabel: label,
       matches,
     }
   })
@@ -474,8 +522,9 @@ const currentRoundMatchups = computed(() => {
 const onMatchScoreSubmit = ({ matchKey, homeScore, awayScore }) => {
   const key = String(matchKey || '')
   if (!key) return
-  const [roundNoText, eventCode, homeGroupNoText, awayGroupNoText] = key.split('-')
+  const [roundNoText, eventCode, eventNoText, homeGroupNoText, awayGroupNoText] = key.split('-')
   const roundNo = Number(roundNoText)
+  const eventNo = Number(eventNoText)
   const homeGroupNo = Number(homeGroupNoText)
   const awayGroupNo = Number(awayGroupNoText)
   const nextHome = Number(homeScore)
@@ -483,6 +532,7 @@ const onMatchScoreSubmit = ({ matchKey, homeScore, awayScore }) => {
   if (
     !Number.isInteger(roundNo) ||
     !eventCode ||
+    !Number.isInteger(eventNo) ||
     !Number.isInteger(homeGroupNo) ||
     !Number.isInteger(awayGroupNo) ||
     !Number.isInteger(nextHome) ||
@@ -500,6 +550,7 @@ const onMatchScoreSubmit = ({ matchKey, homeScore, awayScore }) => {
         score: {
           round_no: roundNo,
           event_code: eventCode,
+          event_no: eventNo,
           home_group_no: homeGroupNo,
           away_group_no: awayGroupNo,
           home_score: nextHome,
@@ -528,18 +579,24 @@ const normalizeTeamGroups = (groups = [], groupCount = 2) => {
           .filter(Boolean)
       )
     )
-    map.set(groupNo, { group_no: groupNo, group_name: `第${groupNo}组`, member_user_ids: memberUserIds })
+    map.set(groupNo, {
+      group_no: groupNo,
+      group_name: `第${groupNo}组`,
+      member_user_ids: memberUserIds,
+    })
   })
 
   const result = []
   for (let index = 1; index <= groupCount; index += 1) {
-    result.push(map.get(index) || { group_no: index, group_name: `第${index}组`, member_user_ids: [] })
+    result.push(
+      map.get(index) || { group_no: index, group_name: `第${index}组`, member_user_ids: [] }
+    )
   }
   return result
 }
 
 const buildAssignmentKey = (item) =>
-  [item.round_no, item.group_no, item.event_code, item.slot_code].join('::')
+  [item.round_no, item.group_no, item.event_code, item.event_no, item.slot_code].join('::')
 
 const rebuildAssignmentDraft = (source = null) => {
   const sourceList = Array.isArray(source) ? source : assignmentDraft.value
@@ -547,16 +604,20 @@ const rebuildAssignmentDraft = (source = null) => {
   sourceList.forEach((item) => sourceMap.set(buildAssignmentKey(item), String(item.user_id || '')))
 
   const rows = []
-  const slots = getTeamEventSlots(teamForm.value.eventCodes)
   for (let roundNo = 1; roundNo <= Number(teamForm.value.roundCount || 1); roundNo += 1) {
+    const slots = getTeamEventSlots(getTeamRoundEventCodes(teamForm.value, roundNo))
     teamGroups.value.forEach((group) => {
       slots.forEach((slot) => {
         rows.push({
           round_no: roundNo,
           group_no: group.group_no,
           event_code: slot.eventCode,
+          event_no: slot.eventNo,
           slot_code: slot.slotCode,
-          user_id: sourceMap.get([roundNo, group.group_no, slot.eventCode, slot.slotCode].join('::')) || '',
+          user_id:
+            sourceMap.get(
+              [roundNo, group.group_no, slot.eventCode, slot.eventNo, slot.slotCode].join('::')
+            ) || '',
         })
       })
     })
@@ -575,7 +636,14 @@ const getGroupMemberOptions = (groupNo) => {
   const memberSet = new Set(group.member_user_ids || [])
   return participantOptions.value.filter((item) => memberSet.has(item.value))
 }
-const getLineupMemberOptions = (roundNo, groupNo, eventCode, slotCode, currentUserId = '') => {
+const getLineupMemberOptions = (
+  roundNo,
+  groupNo,
+  eventCode,
+  eventNo,
+  slotCode,
+  currentUserId = ''
+) => {
   const options = getGroupMemberOptions(groupNo)
   if (!eventCode) return options
 
@@ -585,8 +653,11 @@ const getLineupMemberOptions = (roundNo, groupNo, eventCode, slotCode, currentUs
     getRowsByRoundGroup(roundNo, groupNo)
       .filter(
         (row) =>
-          !(String(row.event_code) === code && String(row.slot_code) === slot) &&
-          String(row.user_id || '').trim()
+          !(
+            String(row.event_code) === code &&
+            Number(row.event_no) === Number(eventNo) &&
+            String(row.slot_code) === slot
+          ) && String(row.user_id || '').trim()
       )
       .map((row) => String(row.user_id))
   )
@@ -647,8 +718,10 @@ const getAssignableParticipantOptions = (groupNo) => {
       if (currentSet.has(item.value)) return { ...item, disabled: false }
       if (stats.totalCount >= requiredTotal) return { ...item, disabled: true }
       if (Number(item.gender) === 0) return { ...item, disabled: true }
-      if (Number(item.gender) === 1 && stats.maleCount >= requiredMale) return { ...item, disabled: true }
-      if (Number(item.gender) === 2 && stats.femaleCount >= requiredFemale) return { ...item, disabled: true }
+      if (Number(item.gender) === 1 && stats.maleCount >= requiredMale)
+        return { ...item, disabled: true }
+      if (Number(item.gender) === 2 && stats.femaleCount >= requiredFemale)
+        return { ...item, disabled: true }
       return { ...item, disabled: false }
     })
 }
@@ -668,7 +741,6 @@ const autoFillLastGroupMembers = (changedGroupNo) => {
     ;(group.member_user_ids || []).forEach((id) => usedByNonLast.add(String(id)))
   })
 
-  const lastStats = getGroupGenderStats(lastGroup)
   const penultimateStats = getGroupGenderStats(penultimateGroup)
   const requiredTotal = Number(teamMinPlayersPerGroup.value || 0)
   const requiredMale = Number(teamGenderRequirementPerGroup.value.male || 0)
@@ -710,7 +782,9 @@ const autoFillLastGroupMembers = (changedGroupNo) => {
 const onGroupMembersChange = (groupNo) => {
   const group = teamGroups.value.find((item) => Number(item.group_no) === Number(groupNo))
   if (group) {
-    const uniqueIds = Array.from(new Set((group.member_user_ids || []).map((id) => String(id || ''))))
+    const uniqueIds = Array.from(
+      new Set((group.member_user_ids || []).map((id) => String(id || '')))
+    )
     const optionSet = new Set(getAssignableParticipantOptions(groupNo).map((item) => item.value))
     group.member_user_ids = uniqueIds.filter((id) => optionSet.has(id))
   }
@@ -720,9 +794,18 @@ const onGroupMembersChange = (groupNo) => {
 const syncTeamFormFromDetail = () => {
   const config = detail.value?.team_config || {}
   teamForm.value.groupCount = Math.max(2, Number(config.group_count || 2))
+  teamForm.value.scheduleMode = config.schedule_mode === 'per_round' ? 'per_round' : 'uniform'
   teamForm.value.eventCodes =
-    Array.isArray(config.event_codes) && config.event_codes.length ? config.event_codes : ['mixed_double']
+    Array.isArray(config.event_codes) && config.event_codes.length
+      ? config.event_codes
+      : ['mixed_double']
   teamForm.value.roundCount = Math.max(1, Number(config.round_count || 1))
+  teamForm.value.roundEventCodes = Array.from({ length: teamForm.value.roundCount }, (_, index) => {
+    const eventCodes = Array.isArray(config.round_event_codes?.[index])
+      ? config.round_event_codes[index]
+      : []
+    return eventCodes.length ? [...eventCodes] : [...teamForm.value.eventCodes]
+  })
   teamForm.value.scoreTarget = TEAM_SCORE_TARGET_OPTIONS.includes(Number(config.score_target))
     ? Number(config.score_target)
     : 21
@@ -734,7 +817,13 @@ const buildScoreMap = (matchScores = [], roundNo) => {
   const scoreMap = {}
   ;(Array.isArray(matchScores) ? matchScores : []).forEach((item) => {
     if (hasRoundFilter && Number(item.round_no) !== targetRoundNo) return
-    const key = [item.round_no, item.event_code, item.home_group_no, item.away_group_no].join('-')
+    const key = [
+      item.round_no,
+      item.event_code,
+      item.event_no,
+      item.home_group_no,
+      item.away_group_no,
+    ].join('-')
     scoreMap[key] = {
       homeScore: Number(item.home_score),
       awayScore: Number(item.away_score),
@@ -764,7 +853,9 @@ const loadDetail = async () => {
     ])
     detail.value = detailResult
     users.value = userList
-    selectedParticipantIds.value = (detailResult?.participants || []).map((item) => String(item.user_id || ''))
+    selectedParticipantIds.value = (detailResult?.participants || []).map((item) =>
+      String(item.user_id || '')
+    )
     if (detailResult?.match_mode === 'team') {
       syncTeamFormFromDetail()
       await loadTeamBusinessData()
@@ -816,13 +907,16 @@ const validateGroups = () => {
 
   for (const group of teamGroups.value) {
     const memberUserIds = Array.from(new Set(group.member_user_ids || []))
-    if (memberUserIds.length !== requiredTotal) throw new Error(`${group.group_name} 人数必须为 ${requiredTotal}`)
+    if (memberUserIds.length !== requiredTotal)
+      throw new Error(`${group.group_name} 人数必须为 ${requiredTotal}`)
     const stats = getGroupGenderStats({ member_user_ids: memberUserIds })
     if (stats.unknownCount > 0) throw new Error(`${group.group_name} 存在性别未知成员`)
     if (stats.maleCount !== requiredMale)
       throw new Error(`${group.group_name} 男生人数需为 ${requiredMale}，当前 ${stats.maleCount}`)
     if (stats.femaleCount !== requiredFemale)
-      throw new Error(`${group.group_name} 女生人数需为 ${requiredFemale}，当前 ${stats.femaleCount}`)
+      throw new Error(
+        `${group.group_name} 女生人数需为 ${requiredFemale}，当前 ${stats.femaleCount}`
+      )
 
     for (const userId of memberUserIds) {
       if (!participantSet.has(userId)) throw new Error(`${group.group_name} 存在非参赛人员`)
@@ -841,15 +935,17 @@ const hasCurrentRoundLineupCompleted = () => {
 const getRoundMatchKeys = (roundNo) => {
   const targetRoundNo = Number(roundNo || 0)
   if (targetRoundNo < 1) return []
-  const groupNos = [...new Set(teamGroups.value.map((item) => Number(item.group_no)).filter((item) => item > 0))].sort(
-    (a, b) => a - b
-  )
+  const groupNos = [
+    ...new Set(teamGroups.value.map((item) => Number(item.group_no)).filter((item) => item > 0)),
+  ].sort((a, b) => a - b)
   if (groupNos.length < 2) return []
   const keys = []
-  ;(teamForm.value.eventCodes || []).forEach((eventCode) => {
+  getRoundEventInstances(targetRoundNo).forEach(({ eventCode, eventNo }) => {
     for (let homeIndex = 0; homeIndex < groupNos.length; homeIndex += 1) {
       for (let awayIndex = homeIndex + 1; awayIndex < groupNos.length; awayIndex += 1) {
-        keys.push(`${targetRoundNo}-${eventCode}-${groupNos[homeIndex]}-${groupNos[awayIndex]}`)
+        keys.push(
+          `${targetRoundNo}-${eventCode}-${eventNo}-${groupNos[homeIndex]}-${groupNos[awayIndex]}`
+        )
       }
     }
   })
@@ -869,7 +965,8 @@ const onLifecycleAction = async (action) => {
     if (!detail.value?.id) throw new Error('缺少赛事ID')
 
     if (action === 'to_team_configuring') {
-      if ((detail.value?.participant_count || 0) < 2) throw new Error('参赛人数不足，无法进入参数设置')
+      if ((detail.value?.participant_count || 0) < 2)
+        throw new Error('参赛人数不足，无法进入参数设置')
       await onSaveParticipants()
       await setLifecycle({ stage: 'team_configuring' })
       ElMessage.success('已进入团体赛参数设置阶段')
@@ -880,6 +977,24 @@ const onLifecycleAction = async (action) => {
       await onSaveTeamConfig()
       await setLifecycle({ stage: 'grouping' })
       ElMessage.success('已进入分组成员阶段')
+      return
+    }
+    if (action === 'back_to_team_configuring') {
+      await ElMessageBox.confirm(
+        '返回后请重新保存团体参数，并重新核对各组成员。确认返回吗？',
+        '返回参数设置',
+        {
+          confirmButtonText: '确认返回',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
+      )
+      await setLifecycle({
+        stage: 'team_configuring',
+        currentRoundNo: 0,
+        currentRoundState: 'waiting_lineup',
+      })
+      ElMessage.success('已返回团体赛参数设置阶段')
       return
     }
     if (action === 'start_rounds') {
@@ -943,7 +1058,10 @@ const lifecycleActionButtons = computed(() => {
     return [{ key: 'to_grouping', label: '进入分组阶段' }]
   }
   if (currentStage.value === 'grouping') {
-    return [{ key: 'start_rounds', label: '开始赛事', type: 'primary' }]
+    return [
+      { key: 'back_to_team_configuring', label: '返回参数设置', type: 'info' },
+      { key: 'start_rounds', label: '开始赛事', type: 'primary' },
+    ]
   }
   if (currentStage.value === 'rounds_in_progress') {
     if (currentRoundState.value === 'waiting_lineup') {
@@ -953,7 +1071,8 @@ const lifecycleActionButtons = computed(() => {
       return [{ key: 'finish_round', label: '完成本轮', type: 'primary' }]
     }
     if (currentRoundState.value === 'round_finished') {
-      const isLastRound = Number(currentRoundNo.value || 0) >= Number(teamForm.value.roundCount || 1)
+      const isLastRound =
+        Number(currentRoundNo.value || 0) >= Number(teamForm.value.roundCount || 1)
       return [
         isLastRound
           ? { key: 'finish_tournament', label: '完成全部比赛', type: 'danger' }
@@ -982,7 +1101,10 @@ const onSaveParticipants = async () => {
         user_id: item.user_id || item.id,
         nickname: item.nickname || item.user_id || item.id,
       }))
-    await updateTournamentParticipants({ tournamentId: detail.value?.id, participants: selectedUsers })
+    await updateTournamentParticipants({
+      tournamentId: detail.value?.id,
+      participants: selectedUsers,
+    })
     ElMessage.success('参赛人员已更新')
     await loadDetail()
   } catch (error) {
@@ -997,15 +1119,35 @@ const onApplyTeamConfig = () => {
   rebuildAssignmentDraft()
 }
 
+const syncRoundEventCodes = (seedEmptyRounds = false) => {
+  const roundCount = Math.max(1, Number(teamForm.value.roundCount || 1))
+  const source = Array.isArray(teamForm.value.roundEventCodes) ? teamForm.value.roundEventCodes : []
+  teamForm.value.roundEventCodes = Array.from({ length: roundCount }, (_, index) => {
+    const current = Array.isArray(source[index]) ? source[index] : []
+    if (current.length || !seedEmptyRounds) return [...current]
+    return [...teamForm.value.eventCodes]
+  })
+}
+
+const onTeamRoundCountChange = () =>
+  syncRoundEventCodes(teamForm.value.scheduleMode === 'per_round')
+
+const onTeamScheduleModeChange = () => {
+  if (teamForm.value.scheduleMode === 'per_round') syncRoundEventCodes(true)
+}
+
 const onSaveTeamConfig = async () => {
   try {
     if (!canEditTeamConfig.value) throw new Error('仅管理员或赛事创建者可保存团体参数')
     savingTeamConfig.value = true
+    syncRoundEventCodes(false)
     await updateTournamentTeamConfig({
       tournamentId: detail.value?.id,
       teamConfig: {
         groupCount: Number(teamForm.value.groupCount || 2),
+        scheduleMode: teamForm.value.scheduleMode,
         eventCodes: teamForm.value.eventCodes,
+        roundEventCodes: teamForm.value.roundEventCodes,
         roundCount: Number(teamForm.value.roundCount || 1),
         scoreTarget: Number(teamForm.value.scoreTarget || 21),
       },
@@ -1046,7 +1188,7 @@ const validateAssignments = (rows = []) => {
   rows.forEach((row) => {
     if (!row.user_id) {
       throw new Error(
-        `第 ${row.round_no} 轮 ${eventLabelMap[row.event_code] || row.event_code} ${slotLabelMap[row.slot_code] || row.slot_code} 未选择人员`
+        `第 ${row.round_no} 轮 ${getEventDisplayLabel(row.event_code, row.event_no, row.round_no)} ${slotLabelMap[row.slot_code] || row.slot_code} 未选择人员`
       )
     }
     const memberSet = groupMemberMap.get(Number(row.group_no))
@@ -1055,12 +1197,13 @@ const validateAssignments = (rows = []) => {
     }
     const groupRoundKey = [row.round_no, row.group_no].join('::')
     const usedSet = sameGroupRoundMap.get(groupRoundKey) || new Set()
-    if (usedSet.has(row.user_id)) throw new Error(`第 ${row.round_no} 轮第 ${row.group_no} 组存在重复上场人员`)
+    if (usedSet.has(row.user_id))
+      throw new Error(`第 ${row.round_no} 轮第 ${row.group_no} 组存在重复上场人员`)
     usedSet.add(row.user_id)
     sameGroupRoundMap.set(groupRoundKey, usedSet)
 
     if (row.event_code === 'mixed_double') {
-      const mixedKey = [row.round_no, row.group_no, row.event_code].join('::')
+      const mixedKey = [row.round_no, row.group_no, row.event_code, row.event_no].join('::')
       const mixedRecord = mixedMap.get(mixedKey) || {}
       mixedRecord[row.slot_code] = row.user_id
       mixedMap.set(mixedKey, mixedRecord)
@@ -1088,7 +1231,9 @@ const onSaveTeamAssignments = async () => {
         editableGroupNoSet.has(Number(row.group_no))
     )
     validateAssignments(scopedRows)
-    const assignmentsToSave = assignmentDraft.value.filter((item) => String(item.user_id || '').trim())
+    const assignmentsToSave = assignmentDraft.value.filter((item) =>
+      String(item.user_id || '').trim()
+    )
     await saveTournamentTeamAssignments({
       tournamentId: detail.value?.id,
       assignments: assignmentsToSave,
@@ -1109,7 +1254,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="detail-page" v-loading.fullscreen.lock="pageLoading">
+  <section v-loading.fullscreen.lock="pageLoading" class="detail-page">
     <el-card shadow="never">
       <template #header>
         <div class="title">{{ detail?.name || '赛事详情' }}</div>
@@ -1162,31 +1307,48 @@ onMounted(async () => {
       <div v-if="showRoundLineupSummary" class="summary-block">
         <div class="summary-title-row">
           <div class="summary-title">轮次组内项目参与情况</div>
-          <el-button text size="small" @click="firstRoundLineupCollapsed = !firstRoundLineupCollapsed">
+          <el-button
+            text
+            size="small"
+            @click="firstRoundLineupCollapsed = !firstRoundLineupCollapsed"
+          >
             {{ firstRoundLineupCollapsed ? '展开' : '收起' }}
           </el-button>
         </div>
         <div v-show="!firstRoundLineupCollapsed">
-          <div v-for="round in roundLineupSummaryList" :key="round.roundNo" class="lineup-summary-round">
+          <div
+            v-for="round in roundLineupSummaryList"
+            :key="round.roundNo"
+            class="lineup-summary-round"
+          >
             <div class="lineup-summary-round-title">第 {{ round.roundNo }} 轮</div>
             <div class="meta">
               本轮已计分对局：{{ getRoundScoreSummary(round.roundNo)?.roundScoredMatches || 0 }}
             </div>
             <div class="lineup-summary-group-grid">
-              <div v-for="group in round.groups" :key="`${round.roundNo}-${group.groupNo}`" class="lineup-summary-group">
+              <div
+                v-for="group in round.groups"
+                :key="`${round.roundNo}-${group.groupNo}`"
+                class="lineup-summary-group"
+              >
                 <div class="lineup-summary-group-title">{{ group.groupName }}</div>
                 <div v-for="row in group.rows" :key="row.key" class="meta">{{ row.text }}</div>
                 <div class="group-score-summary">
                   <div class="meta">
-                    组内总得分：{{ getGroupScoreSummary(round.roundNo, group.groupNo)?.totalWinPoints || 0 }}，
-                    组内总净胜分：{{ getGroupScoreSummary(round.roundNo, group.groupNo)?.totalNetScore || 0 }}
+                    组内总得分：{{
+                      getGroupScoreSummary(round.roundNo, group.groupNo)?.totalWinPoints || 0
+                    }}， 组内总净胜分：{{
+                      getGroupScoreSummary(round.roundNo, group.groupNo)?.totalNetScore || 0
+                    }}
                   </div>
                   <div
-                    v-for="event in getGroupScoreSummary(round.roundNo, group.groupNo)?.events || []"
-                    :key="`${round.roundNo}-${group.groupNo}-${event.eventCode}`"
+                    v-for="event in getGroupScoreSummary(round.roundNo, group.groupNo)?.events ||
+                    []"
+                    :key="`${round.roundNo}-${group.groupNo}-${event.eventCode}-${event.eventNo}`"
                     class="meta"
                   >
-                    {{ event.eventLabel }}：得分 {{ event.winPoints }}，总分 {{ event.totalScore }}，净胜分 {{ event.netScore }}
+                    {{ event.eventLabel }}：得分 {{ event.winPoints }}，总分
+                    {{ event.totalScore }}，净胜分 {{ event.netScore }}
                   </div>
                 </div>
               </div>
@@ -1195,10 +1357,11 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div v-if="currentStage === 'rounds_in_progress' || currentStage === 'finished'" class="summary-block">
-        <div class="meta">
-          当前轮次：{{ currentRoundNo || '-' }}
-        </div>
+      <div
+        v-if="currentStage === 'rounds_in_progress' || currentStage === 'finished'"
+        class="summary-block"
+      >
+        <div class="meta">当前轮次：{{ currentRoundNo || '-' }}</div>
         <div class="meta">
           轮次状态：{{ roundStateLabelMap[currentRoundState] || currentRoundState }}
         </div>
@@ -1220,14 +1383,18 @@ onMounted(async () => {
 
     <TournamentTeamConfigPanel
       v-if="showTeamConfigPanel"
+      v-model:team-form="teamForm"
       :can-edit-team-config="canEditTeamConfig"
-      :team-form="teamForm"
       :team-event-options="TEAM_EVENT_OPTIONS"
+      :team-event-schedule-modes="TEAM_EVENT_SCHEDULE_MODES"
       :team-score-target-options="TEAM_SCORE_TARGET_OPTIONS"
       :team-min-players-per-group="teamMinPlayersPerGroup"
       :team-gender-requirement-per-group="teamGenderRequirementPerGroup"
+      :team-roster-requirement="teamRosterRequirement"
       :saving-team-config="savingTeamConfig"
       @save-config="onSaveTeamConfig"
+      @round-count-change="onTeamRoundCountChange"
+      @schedule-mode-change="onTeamScheduleModeChange"
     />
 
     <TournamentTeamGroupsPanel
@@ -1236,6 +1403,7 @@ onMounted(async () => {
       :can-manage-team-groups="canManageTeamGroups"
       :get-assignable-participant-options="getAssignableParticipantOptions"
       :get-gender-label="getGenderLabel"
+      :team-roster-requirement="teamRosterRequirement"
       :saving-team-groups="savingTeamGroups"
       @group-members-change="onGroupMembersChange"
       @save-groups="onSaveTeamGroups"
@@ -1249,7 +1417,7 @@ onMounted(async () => {
       :current-round-no="currentEditableRoundNo"
       :editable-group-nos="editableTeamGroupNos"
       :get-rows-by-round-group="getRowsByRoundGroup"
-      :event-label-map="eventLabelMap"
+      :get-event-label="getEventDisplayLabel"
       :slot-label-map="slotLabelMap"
       :get-lineup-member-options="getLineupMemberOptions"
       :saving-team-assignments="savingTeamAssignments"
@@ -1269,7 +1437,7 @@ onMounted(async () => {
     />
 
     <div v-if="isTeamMode" class="action-row">
-      <div class="meta" v-if="!canOperateLifecycle">仅管理员或赛事创建者可操作阶段变更</div>
+      <div v-if="!canOperateLifecycle" class="meta">仅管理员或赛事创建者可操作阶段变更</div>
       <el-button
         v-for="item in lifecycleActionButtons"
         :key="item.key"
@@ -1278,6 +1446,11 @@ onMounted(async () => {
         :loading="savingLifecycle"
         :disabled="!canOperateLifecycle"
         class="action-btn"
+        :class="{
+          'action-btn--back': item.key === 'back_to_team_configuring',
+          'action-btn--main': item.key !== 'back_to_team_configuring',
+          'action-btn--single': lifecycleActionButtons.length === 1,
+        }"
         @click="onLifecycleAction(item.key)"
       >
         {{ item.label }}
@@ -1419,13 +1592,40 @@ onMounted(async () => {
 
 .action-row {
   display: flex;
-  flex-direction: column;
+  width: 100%;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 10px;
 }
 
+.action-row > .meta {
+  width: 100%;
+  text-align: center;
+}
+
 .action-btn {
-  min-width: 180px;
+  min-width: 0;
+  height: 44px;
+  margin-left: 0 !important;
+  border-radius: 8px;
+}
+
+.action-btn--back {
+  flex: 0 0 32%;
+  max-width: 120px;
+  padding-right: 10px;
+  padding-left: 10px;
+  font-size: 13px;
+}
+
+.action-btn--main {
+  flex: 1;
+  font-weight: 600;
+}
+
+.action-btn--single {
+  flex: 0 1 240px;
+  width: min(100%, 240px);
 }
 </style>

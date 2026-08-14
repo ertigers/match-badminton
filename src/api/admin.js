@@ -102,6 +102,51 @@ const restoreSession = (snapshot) => {
   })
 }
 
+const buildRegistrationPayload = (account, password) => {
+  const value = String(account || '').trim()
+  const emailRule = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const phoneRule = /^1\d{10}$/
+
+  if (emailRule.test(value)) return { email: value, password }
+  if (phoneRule.test(value)) return { phone: value, password }
+  return { username: value, password }
+}
+
+export const registerUserByAdmin = async ({ account, nickname, password, gender }) => {
+  const accountValue = String(account || '').trim()
+  const nicknameValue = String(nickname || '').trim()
+  const passwordValue = String(password || '')
+  const genderValue = Number(gender)
+
+  if (!accountValue) throw new Error('请输入登录账号')
+  if (!nicknameValue) throw new Error('请输入用户昵称')
+  if (passwordValue.length < 6) throw new Error('密码至少 6 位')
+  if (![0, 1, 2].includes(genderValue)) throw new Error('请选择性别')
+
+  const sessionSnapshot = snapshotSession()
+
+  try {
+    await BaaS.auth.register(buildRegistrationPayload(accountValue, passwordValue))
+    const currentUser = await BaaS.auth.getCurrentUser()
+
+    if (!currentUser) {
+      throw new Error('注册成功但未获取到用户对象')
+    }
+
+    currentUser.set('nickname', nicknameValue)
+    currentUser.set('gender', genderValue)
+    await currentUser.update()
+
+    return {
+      id: currentUser.id || currentUser.user_id || '',
+      nickname: nicknameValue,
+      gender: genderValue,
+    }
+  } finally {
+    restoreSession(sessionSnapshot)
+  }
+}
+
 // 查询用户
 export const listAllUsers = async () => {
   const table = new BaaS.TableObject(USER_PROFILE_TABLE)
@@ -152,9 +197,7 @@ export const listAllUsers = async () => {
     }
   })
 
-  const userIds = baseUsers
-    .map((item) => String(item.user_id || '').trim())
-    .filter(Boolean)
+  const userIds = baseUsers.map((item) => String(item.user_id || '').trim()).filter(Boolean)
   const statsMap = await listUserStatsMap(userIds)
 
   return baseUsers.map((item) => {

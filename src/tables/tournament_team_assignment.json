@@ -1,15 +1,9 @@
 {
   "name": "tournament_team_assignment",
   "description": "团体赛排位信息",
-  "row_read_perm": [
-    "user:*"
-  ],
-  "row_write_perm": [
-    "user:*"
-  ],
-  "write_perm": [
-    "user:*"
-  ],
+  "row_read_perm": ["user:*"],
+  "row_write_perm": ["user:*"],
+  "write_perm": ["user:*"],
   "schema": {
     "fields": [
       {
@@ -36,6 +30,12 @@
         "name": "event_code",
         "type": "string",
         "description": "项目编码：male_double/mixed_double/female_double/male_single/female_single"
+      },
+      {
+        "name": "event_no",
+        "type": "number",
+        "default": 1,
+        "description": "同轮次同项目序号，从1开始"
       },
       {
         "name": "slot_code",

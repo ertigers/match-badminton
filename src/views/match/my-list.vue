@@ -43,7 +43,7 @@ onMounted(async () => {
   <section class="my-list-page" v-loading.fullscreen.lock="loading">
     <el-card shadow="never">
       <template #header>
-        <div class="title">鎴戝弬涓庣殑璧涗簨</div>
+        <div class="title">我参与的比赛</div>
       </template>
       <div v-if="list.length" class="list-wrap">
         <div v-for="item in list" :key="item.id" class="item-card" @click="toDetail(item.id)">
@@ -51,11 +51,11 @@ onMounted(async () => {
             <div class="name">{{ item.name }}</div>
             <el-tag size="small">{{ item.status }}</el-tag>
           </div>
-          <div class="meta">瀵瑰眬鏂瑰紡锛歿{ modeMap[item.match_mode] || item.match_mode || '-' }}</div>
-          <div class="meta">鍙備笌浜烘暟锛歿{ item.participant_count }}</div>
+          <div class="meta">对局方式：{{ modeMap[item.match_mode] || item.match_mode || '-' }}</div>
+          <div class="meta">参与人数：{{ item.participant_count }}</div>
         </div>
       </div>
-      <el-empty v-else description="鏆傛棤鍙備笌璧涗簨" />
+      <el-empty v-else description="暂无参与比赛" />
     </el-card>
   </section>
 </template>
@@ -99,4 +99,3 @@ onMounted(async () => {
   line-height: 1.6;
 }
 </style>
-
