@@ -86,3 +86,31 @@ export const logoutRequest = async () => {
   await BaaS.auth.logout()
 }
 
+export const updateCurrentUserPassword = async ({ currentPassword, newPassword }) => {
+  const password = String(currentPassword || '')
+  const nextPassword = String(newPassword || '')
+
+  if (!password) throw new Error('请输入当前密码')
+  if (nextPassword.length < 6) throw new Error('新密码至少 6 位')
+  if (password === nextPassword) throw new Error('新密码不能与当前密码相同')
+
+  const currentUser = await BaaS.auth.getCurrentUser()
+  if (!currentUser?.updatePassword) {
+    throw new Error('当前账号不支持修改密码')
+  }
+
+  try {
+    await currentUser.updatePassword({
+      password,
+      newPassword: nextPassword,
+    })
+  } catch (error) {
+    const message =
+      error?.data?.error_msg ||
+      error?.data?.message ||
+      error?.response?.data?.error_msg ||
+      error?.message ||
+      '密码修改失败，请确认当前密码是否正确'
+    throw new Error(message)
+  }
+}

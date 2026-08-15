@@ -1,17 +1,19 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowRight,
   Calendar,
   DataLine,
   Grid,
+  Lock,
   Medal,
   SwitchButton,
   Trophy,
   User,
 } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
+import { updateCurrentUserPassword } from '../../api/auth'
 import { listUserStatsMap } from '../../api/user-stats'
 import { useAuthStore } from '../../stores/auth'
 import { showErrorMessage } from '../../utils/error'
@@ -35,6 +37,14 @@ const genderMap = {
 const userStats = ref({ ...defaultStats })
 const statsLoading = ref(false)
 const logoutLoading = ref(false)
+const passwordDialogVisible = ref(false)
+const passwordUpdating = ref(false)
+const passwordFormRef = ref(null)
+const passwordForm = reactive({
+  currentPassword: '',
+  newPassword: '',
+  confirmPassword: '',
+})
 
 const userName = computed(() => authStore.user?.nickname || authStore.user?.name || '用户')
 const userId = computed(() => String(authStore.user?.id || '').trim())
@@ -57,6 +67,10 @@ const profileThemeClass = computed(() => {
 const hasAdminCommonPermission = computed(
   () => authStore.isAdmin || authStore.hasPermission('admin-common')
 )
+const canChangePassword = computed(
+  () =>
+    authStore.isAdmin || authStore.hasPermission('admin') || authStore.hasPermission('admin-common')
+)
 const roleLabels = computed(() => {
   const labels = []
   if (authStore.isAdmin) labels.push('白名单管理员')
@@ -64,6 +78,27 @@ const roleLabels = computed(() => {
   if (authStore.hasPermission('admin-common')) labels.push('赛事管理员')
   return labels.length ? labels : ['普通用户']
 })
+
+const validateConfirmPassword = (_, value, callback) => {
+  if (!value) {
+    callback(new Error('请再次输入新密码'))
+    return
+  }
+  if (value !== passwordForm.newPassword) {
+    callback(new Error('两次输入的新密码不一致'))
+    return
+  }
+  callback()
+}
+
+const passwordRules = {
+  currentPassword: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 6, message: '新密码至少 6 位', trigger: 'blur' },
+  ],
+  confirmPassword: [{ validator: validateConfirmPassword, trigger: 'blur' }],
+}
 
 const loadMyStats = async () => {
   if (!userId.value) {
@@ -83,6 +118,42 @@ const loadMyStats = async () => {
 }
 
 const goTo = (path) => router.push(path)
+
+const resetPasswordForm = () => {
+  Object.assign(passwordForm, {
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  })
+  passwordFormRef.value?.clearValidate()
+}
+
+const openPasswordDialog = () => {
+  if (!canChangePassword.value) return
+  resetPasswordForm()
+  passwordDialogVisible.value = true
+}
+
+const submitPasswordChange = async () => {
+  if (!canChangePassword.value) return
+
+  const valid = await passwordFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+
+  try {
+    passwordUpdating.value = true
+    await updateCurrentUserPassword({
+      currentPassword: passwordForm.currentPassword,
+      newPassword: passwordForm.newPassword,
+    })
+    ElMessage.success('密码修改成功，下次登录请使用新密码')
+    passwordDialogVisible.value = false
+  } catch (error) {
+    showErrorMessage(error)
+  } finally {
+    passwordUpdating.value = false
+  }
+}
 
 const onLogout = async () => {
   try {
@@ -213,8 +284,90 @@ onMounted(loadMyStats)
             <span v-for="item in roleLabels" :key="item" class="role-tag">{{ item }}</span>
           </span>
         </div>
+        <button
+          v-if="canChangePassword"
+          class="account-row account-row--action"
+          type="button"
+          @click="openPasswordDialog"
+        >
+          <span class="account-icon account-icon--password"
+            ><el-icon><Lock /></el-icon
+          ></span>
+          <span class="account-label">修改密码</span>
+          <span class="account-action-text">验证当前密码后修改</span>
+          <el-icon class="account-arrow"><ArrowRight /></el-icon>
+        </button>
       </div>
     </div>
+
+    <el-dialog
+      v-model="passwordDialogVisible"
+      title="修改密码"
+      width="min(420px, calc(100vw - 32px))"
+      :close-on-click-modal="!passwordUpdating"
+      :close-on-press-escape="!passwordUpdating"
+      :show-close="!passwordUpdating"
+      @closed="resetPasswordForm"
+    >
+      <el-form
+        ref="passwordFormRef"
+        :model="passwordForm"
+        :rules="passwordRules"
+        label-position="top"
+      >
+        <el-form-item label="当前密码" prop="currentPassword">
+          <el-input
+            v-model="passwordForm.currentPassword"
+            type="password"
+            size="large"
+            show-password
+            autocomplete="current-password"
+            placeholder="请输入当前密码"
+          />
+        </el-form-item>
+        <el-form-item label="新密码" prop="newPassword">
+          <el-input
+            v-model="passwordForm.newPassword"
+            type="password"
+            size="large"
+            show-password
+            autocomplete="new-password"
+            placeholder="至少 6 位"
+          />
+        </el-form-item>
+        <el-form-item label="确认新密码" prop="confirmPassword">
+          <el-input
+            v-model="passwordForm.confirmPassword"
+            type="password"
+            size="large"
+            show-password
+            autocomplete="new-password"
+            placeholder="请再次输入新密码"
+            @keyup.enter="submitPasswordChange"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <div class="password-dialog-footer">
+          <el-button
+            size="large"
+            :disabled="passwordUpdating"
+            @click="passwordDialogVisible = false"
+          >
+            取消
+          </el-button>
+          <el-button
+            size="large"
+            type="primary"
+            :loading="passwordUpdating"
+            @click="submitPasswordChange"
+          >
+            确认修改
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
 
     <el-button
       class="logout-button"
@@ -534,6 +687,11 @@ onMounted(loadMyStats)
   color: #8b63df;
 }
 
+.account-icon--password {
+  background: #fff5e8;
+  color: #e6a23c;
+}
+
 .account-label {
   flex: 0 0 auto;
   color: #606266;
@@ -562,6 +720,36 @@ onMounted(loadMyStats)
   padding-top: 6px;
 }
 
+.account-row--action {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.account-row--action:active {
+  background: #f7f9fc;
+}
+
+.account-action-text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #909399;
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-arrow {
+  flex: 0 0 auto;
+  color: #c4c9d0;
+}
+
 .role-list {
   display: flex;
   min-width: 0;
@@ -584,6 +772,12 @@ onMounted(loadMyStats)
   width: 100%;
   min-height: 44px;
   border-radius: 13px;
+}
+
+.password-dialog-footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 @media (min-width: 768px) {
