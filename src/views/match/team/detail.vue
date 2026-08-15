@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Trophy } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
@@ -56,6 +56,7 @@ const matchupScoreDraft = ref({})
 const savingMatchScore = ref(false)
 const refreshingMatchups = ref(false)
 const firstRoundLineupCollapsed = ref(true)
+const activeDetailTab = ref('action')
 const pageLoading = computed(
   () =>
     loading.value ||
@@ -245,7 +246,6 @@ const currentStageIndex = computed(() => {
   return index >= 0 ? index : 0
 })
 const showParticipantSummary = computed(() => currentStageIndex.value >= 0)
-const showParticipant = computed(() => currentStageIndex.value >= 1 && currentStageIndex.value <= 2)
 const showTeamConfigSummary = computed(() => isTeamMode.value && currentStageIndex.value >= 2)
 const showGroupSummary = computed(() => isTeamMode.value && currentStageIndex.value >= 3)
 const showParticipantsPanel = computed(() => currentStageIndex.value === 0)
@@ -1370,15 +1370,79 @@ const onSaveTeamAssignments = async (throwOnError = false) => {
   }
 }
 
+const showStatusTab = computed(() => showLiveRanking.value || showRoundLineupSummary.value)
+const currentActionBadge = computed(() => {
+  if (showTeamLineupsPanel.value) return '待排位'
+  if (showTeamMatchupsPanel.value) {
+    const unscoredCount = getUnscoredMatchKeys(currentRoundNo.value).length
+    return unscoredCount > 0 ? `差${unscoredCount}场` : '待完成'
+  }
+  if (lifecycleActionButtons.value.length) return '待处理'
+  return ''
+})
+const hasCurrentActionContent = computed(
+  () =>
+    showParticipantsPanel.value ||
+    showTeamConfigPanel.value ||
+    showTeamGroupsPanel.value ||
+    showTeamLineupsPanel.value ||
+    showTeamMatchupsPanel.value ||
+    lifecycleActionButtons.value.length > 0
+)
+const detailTabs = computed(() => [
+  { key: 'overview', label: '概览' },
+  { key: 'teams', label: '队伍' },
+  { key: 'status', label: '赛况', disabled: !showStatusTab.value },
+  { key: 'action', label: '当前操作', badge: currentActionBadge.value },
+])
+const detailTabStorageKey = computed(() => `team-detail-tab:${String(route.params.id || '')}`)
+
+const initializeDetailTab = () => {
+  const availableTabKeys = new Set(
+    detailTabs.value.filter((item) => !item.disabled).map((item) => item.key)
+  )
+  const storedTab = window.sessionStorage.getItem(detailTabStorageKey.value)
+  const defaultTab = currentStage.value === 'finished' && showStatusTab.value ? 'status' : 'action'
+  activeDetailTab.value = availableTabKeys.has(storedTab) ? storedTab : defaultTab
+}
+
+watch(activeDetailTab, (value) => {
+  window.sessionStorage.setItem(detailTabStorageKey.value, value)
+})
+
+watch(detailTabs, (tabs) => {
+  if (tabs.some((item) => item.key === activeDetailTab.value && !item.disabled)) return
+  activeDetailTab.value = currentStage.value === 'finished' && showStatusTab.value ? 'status' : 'action'
+})
+
 onMounted(async () => {
   await authStore.loadPermissions()
   await loadDetail()
+  initializeDetailTab()
 })
 </script>
 
 <template>
   <section v-loading.fullscreen.lock="pageLoading" class="detail-page">
-    <el-card class="overview-card" shadow="never">
+    <nav class="detail-tabs" aria-label="比赛详情分类">
+      <button
+        v-for="tab in detailTabs"
+        :key="tab.key"
+        type="button"
+        class="detail-tab"
+        :class="{
+          'detail-tab--active': activeDetailTab === tab.key,
+          'detail-tab--disabled': tab.disabled,
+        }"
+        :disabled="tab.disabled"
+        @click="activeDetailTab = tab.key"
+      >
+        <span>{{ tab.label }}</span>
+        <small v-if="tab.badge">{{ tab.badge }}</small>
+      </button>
+    </nav>
+
+    <el-card v-if="activeDetailTab === 'overview'" class="overview-card tab-panel" shadow="never">
       <template #header>
         <div class="overview-header">
           <div class="title">{{ detail?.name || '赛事详情' }}</div>
@@ -1403,20 +1467,6 @@ onMounted(async () => {
         <div class="stat-item stat-item--female">
           <strong>{{ femaleCount }}</strong>
           <span>女生</span>
-        </div>
-      </div>
-      <div v-if="showParticipant" class="summary-block">
-        <div class="summary-title">已报名人员</div>
-        <div class="summary-tags">
-          <el-tag
-            v-for="item in enrichedParticipants"
-            :key="item.user_id"
-            effect="plain"
-            size="small"
-            :type="getGenderTagType(item.gender)"
-          >
-            {{ item.nickname || item.user_id }}
-          </el-tag>
         </div>
       </div>
       <div v-if="showTeamConfigSummary" class="summary-block">
@@ -1456,13 +1506,58 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <div v-if="showGroupSummary" class="summary-block">
+      <div
+        v-if="currentStage === 'rounds_in_progress' || currentStage === 'finished'"
+        class="round-progress"
+      >
+        <div class="round-progress-index">
+          <span>当前轮次</span>
+          <strong>第 {{ currentRoundNo || '-' }} 轮</strong>
+        </div>
+        <div class="round-progress-state">
+          <span class="progress-dot"></span>
+          {{ roundStateLabelMap[currentRoundState] || currentRoundState }}
+        </div>
+      </div>
+    </el-card>
+
+    <el-card v-if="activeDetailTab === 'teams'" class="teams-card tab-panel" shadow="never">
+      <template #header>
+        <div class="tab-panel-header">
+          <div>
+            <div class="tab-panel-title">参赛队伍</div>
+            <div class="tab-panel-subtitle">查看报名人员、分组名单和男女比例</div>
+          </div>
+          <span class="panel-count">{{ detail?.participant_count || 0 }} 人</span>
+        </div>
+      </template>
+
+      <div class="summary-section summary-section--first">
+        <div class="summary-title">已报名人员</div>
+        <div v-if="enrichedParticipants.length" class="summary-tags">
+          <el-tag
+            v-for="item in enrichedParticipants"
+            :key="item.user_id"
+            effect="plain"
+            size="small"
+            :type="getGenderTagType(item.gender)"
+          >
+            {{ item.nickname || item.user_id }}
+          </el-tag>
+        </div>
+        <div v-else class="tab-empty-text">暂无报名人员</div>
+      </div>
+
+      <div v-if="showGroupSummary" class="summary-section">
         <div class="summary-title">分组成员</div>
         <div class="group-summary-list">
           <div v-for="item in groupSummaryList" :key="item.groupNo" class="group-summary-card">
             <div class="group-summary-header">
               <strong>第 {{ item.groupNo }} 组</strong>
-              <span>{{ item.members.length }} 人 · 男 {{ item.maleCount }} / 女 {{ item.femaleCount }}</span>
+              <span>
+                {{ item.members.length }} 人 · 男 {{ item.maleCount }} / 女
+                {{ item.femaleCount }}
+              </span>
             </div>
             <div v-if="item.members.length" class="member-tags">
               <span
@@ -1481,7 +1576,24 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <div v-if="showLiveRanking" class="summary-block">
+      <div v-else class="stage-empty-card">
+        <strong>分组尚未完成</strong>
+        <span>进入分组阶段并保存后，这里会展示各组成员。</span>
+      </div>
+    </el-card>
+
+    <el-card v-if="activeDetailTab === 'status'" class="status-card tab-panel" shadow="never">
+      <template #header>
+        <div class="tab-panel-header">
+          <div>
+            <div class="tab-panel-title">比赛赛况</div>
+            <div class="tab-panel-subtitle">排名、轮次阵容与项目得分汇总</div>
+          </div>
+          <span class="panel-count">第 {{ currentRoundNo || '-' }} 轮</span>
+        </div>
+      </template>
+
+      <div v-if="showLiveRanking" class="summary-block summary-block--first">
         <div class="summary-title-row ranking-title-row">
           <div class="summary-title">实时排名</div>
           <span class="ranking-tip">积分优先 · 净胜分次之</span>
@@ -1513,7 +1625,12 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <div v-if="showRoundLineupSummary" class="summary-block">
+
+      <div
+        v-if="showRoundLineupSummary"
+        class="summary-block"
+        :class="{ 'summary-block--first': !showLiveRanking }"
+      >
         <div class="summary-title-row">
           <div class="summary-title">轮次组内项目参与情况</div>
           <el-button
@@ -1596,36 +1713,28 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-
-      <div
-        v-if="currentStage === 'rounds_in_progress' || currentStage === 'finished'"
-        class="round-progress"
-      >
-        <div class="round-progress-index">
-          <span>当前轮次</span>
-          <strong>第 {{ currentRoundNo || '-' }} 轮</strong>
-        </div>
-        <div class="round-progress-state">
-          <span class="progress-dot"></span>
-          {{ roundStateLabelMap[currentRoundState] || currentRoundState }}
-        </div>
-      </div>
     </el-card>
 
-    <TournamentParticipantsPanel
-      v-if="showParticipantsPanel"
-      :can-manage-participants="canManageParticipants"
-      :participant-editor-visible="participantEditorVisible"
-      :enriched-participants="enrichedParticipants"
-      :users="users"
-      :selected-participant-ids="selectedParticipantIds"
-      :saving-participants="savingParticipants"
-      @toggle-editor="participantEditorVisible = !participantEditorVisible"
-      @toggle-participant="toggleParticipant"
-      @save-participants="onSaveParticipants"
-    />
+    <div v-if="activeDetailTab === 'action'" class="action-tab-panel tab-panel">
+      <div v-if="!hasCurrentActionContent" class="action-completed-card">
+        <span class="action-completed-icon">✓</span>
+        <strong>当前没有待处理操作</strong>
+        <span>赛事流程已完成，可前往赛况查看最终排名和各轮结果。</span>
+      </div>
+      <TournamentParticipantsPanel
+        v-if="showParticipantsPanel"
+        :can-manage-participants="canManageParticipants"
+        :participant-editor-visible="participantEditorVisible"
+        :enriched-participants="enrichedParticipants"
+        :users="users"
+        :selected-participant-ids="selectedParticipantIds"
+        :saving-participants="savingParticipants"
+        @toggle-editor="participantEditorVisible = !participantEditorVisible"
+        @toggle-participant="toggleParticipant"
+        @save-participants="onSaveParticipants"
+      />
 
-    <TournamentTeamConfigPanel
+      <TournamentTeamConfigPanel
       v-if="showTeamConfigPanel"
       v-model:team-form="teamForm"
       :can-edit-team-config="canEditTeamConfig"
@@ -1639,9 +1748,9 @@ onMounted(async () => {
       @save-config="onSaveTeamConfig"
       @round-count-change="onTeamRoundCountChange"
       @schedule-mode-change="onTeamScheduleModeChange"
-    />
+      />
 
-    <TournamentTeamGroupsPanel
+      <TournamentTeamGroupsPanel
       v-if="showTeamGroupsPanel"
       :team-groups="teamGroups"
       :can-manage-team-groups="canManageTeamGroups"
@@ -1651,9 +1760,9 @@ onMounted(async () => {
       :saving-team-groups="savingTeamGroups"
       @group-members-change="onGroupMembersChange"
       @save-groups="onSaveTeamGroups"
-    />
+      />
 
-    <TournamentTeamLineupsPanel
+      <TournamentTeamLineupsPanel
       v-if="showTeamLineupsPanel"
       :can-edit-team-lineups="canEditTeamLineups"
       :team-form="teamForm"
@@ -1666,9 +1775,9 @@ onMounted(async () => {
       :get-lineup-member-options="getLineupMemberOptions"
       :saving-team-assignments="savingTeamAssignments"
       @save-assignments="onSaveTeamAssignments"
-    />
+      />
 
-    <TournamentTeamMatchupsPanel
+      <TournamentTeamMatchupsPanel
       v-if="showTeamMatchupsPanel"
       :round-no="currentRoundNo"
       :matchups="currentRoundMatchups"
@@ -1678,9 +1787,16 @@ onMounted(async () => {
       :refreshing="refreshingMatchups"
       @score-submit="onMatchScoreSubmit"
       @refresh="onRefreshMatchups"
-    />
+      />
 
-    <div v-if="isTeamMode" class="action-row">
+      <div
+        v-if="
+          isTeamMode &&
+          (lifecycleActionButtons.length ||
+            (showTeamLineupsPanel && canEditTeamLineups && !canOperateLifecycle))
+        "
+        class="action-row"
+      >
       <template v-if="showTeamLineupsPanel && canEditTeamLineups && !canOperateLifecycle">
         <el-button
           type="primary"
@@ -1713,6 +1829,7 @@ onMounted(async () => {
           {{ item.label }}
         </el-button>
       </template>
+      </div>
     </div>
   </section>
 </template>
@@ -1721,6 +1838,188 @@ onMounted(async () => {
 .detail-page {
   display: grid;
   gap: 12px;
+}
+
+.detail-tabs {
+  position: sticky;
+  top: 66px;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid rgba(120, 134, 161, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 24px rgba(50, 72, 120, 0.09);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.detail-tab {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 7px 5px;
+  border: 0;
+  border-radius: 12px;
+  color: #788195;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.detail-tab small {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  max-width: 44px;
+  overflow: hidden;
+  padding: 1px 4px;
+  border-radius: 999px;
+  color: #fff;
+  background: #f08b61;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-tab--active {
+  color: #fff;
+  background: linear-gradient(135deg, #617df5, #5368df);
+  box-shadow: 0 6px 14px rgba(79, 109, 245, 0.22);
+}
+
+.detail-tab--disabled {
+  color: #b6bcc8;
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.tab-panel {
+  animation: detail-tab-enter 0.22s ease-out;
+}
+
+.action-tab-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.tab-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tab-panel-title {
+  color: #30384a;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.tab-panel-subtitle {
+  margin-top: 4px;
+  color: #9299a9;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.panel-count {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #5368d7;
+  background: #edf1ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.summary-section + .summary-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(120, 134, 161, 0.11);
+}
+
+.summary-section--first .summary-title,
+.summary-block--first {
+  margin-top: 0;
+}
+
+.tab-empty-text {
+  color: #9ca3b2;
+  font-size: 12px;
+}
+
+.stage-empty-card,
+.action-completed-card {
+  display: flex;
+  min-height: 150px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 16px;
+  padding: 22px;
+  border: 1px dashed rgba(120, 134, 161, 0.2);
+  border-radius: 15px;
+  color: #9299a9;
+  background: #f8f9fc;
+  text-align: center;
+}
+
+.stage-empty-card strong,
+.action-completed-card strong {
+  color: #5d667a;
+  font-size: 14px;
+}
+
+.stage-empty-card span,
+.action-completed-card > span:last-child {
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.action-completed-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(135deg, #65c998, #43b47d);
+  box-shadow: 0 7px 16px rgba(67, 180, 125, 0.2);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+@keyframes detail-tab-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-panel {
+    animation-duration: 0.01ms;
+  }
 }
 
 .title {
