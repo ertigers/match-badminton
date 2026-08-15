@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { Trophy } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { listAllUsers } from '../../../api/admin'
@@ -117,6 +118,19 @@ const isTeamMode = computed(() => detail.value?.match_mode === 'team')
 const modeLabel = computed(() => {
   const code = detail.value?.match_mode
   return MATCH_MODES.find((item) => item.code === code)?.label || code || '-'
+})
+const statusMeta = computed(() => {
+  const statusMap = {
+    draft: { label: '筹备中', className: 'is-draft' },
+    running: { label: '进行中', className: 'is-running' },
+    finished: { label: '已完成', className: 'is-finished' },
+  }
+  return (
+    statusMap[String(detail.value?.status || '')] || {
+      label: String(detail.value?.status || '未知'),
+      className: 'is-draft',
+    }
+  )
 })
 
 const userMap = computed(() => {
@@ -248,29 +262,41 @@ const showTeamMatchupsPanel = computed(() => {
   if (!['playing', 'round_finished'].includes(currentRoundState.value)) return false
   return isRoundLineupCompleted(currentRoundNo.value)
 })
-const formatEventCodes = (eventCodes) =>
-  getTeamEventInstances(eventCodes)
-    .map((item) => item.label)
-    .join(' / ')
-const teamConfigSummaryText = computed(() => {
-  const modeText = teamForm.value.scheduleMode === 'per_round' ? '每轮单独配置' : '所有轮次相同'
-  const eventText =
-    teamForm.value.scheduleMode === 'per_round'
-      ? Array.from(
-          { length: Number(teamForm.value.roundCount || 1) },
-          (_, index) =>
-            `第${index + 1}轮 ${formatEventCodes(getTeamRoundEventCodes(teamForm.value, index + 1)) || '-'}`
-        ).join('；')
-      : formatEventCodes(teamForm.value.eventCodes) || '-'
-  return `分组 ${teamForm.value.groupCount} 组，${modeText}，${eventText}，分值 ${teamForm.value.scoreTarget}`
+const teamConfigRoundList = computed(() => {
+  if (teamForm.value.scheduleMode !== 'per_round') {
+    return [
+      {
+        roundNo: 0,
+        label: '每轮',
+        events: getTeamEventInstances(teamForm.value.eventCodes),
+      },
+    ]
+  }
+  return Array.from({ length: Number(teamForm.value.roundCount || 1) }, (_, index) => ({
+    roundNo: index + 1,
+    label: `第 ${index + 1} 轮`,
+    events: getTeamEventInstances(getTeamRoundEventCodes(teamForm.value, index + 1)),
+  }))
 })
 const groupSummaryList = computed(() =>
-  teamGroups.value.map((group) => ({
-    groupNo: group.group_no,
-    memberNames: (group.member_user_ids || [])
-      .map((id) => participantOptions.value.find((item) => item.value === String(id))?.label || id)
-      .filter(Boolean),
-  }))
+  teamGroups.value.map((group) => {
+    const members = (group.member_user_ids || [])
+      .map((id) => {
+        const participant = participantOptions.value.find((item) => item.value === String(id))
+        return {
+          id: String(id),
+          name: participant?.label || id,
+          gender: Number(participant?.gender || 0),
+        }
+      })
+      .filter((item) => item.name)
+    return {
+      groupNo: group.group_no,
+      members,
+      maleCount: members.filter((item) => item.gender === 1).length,
+      femaleCount: members.filter((item) => item.gender === 2).length,
+    }
+  })
 )
 const visibleSummaryRoundNos = computed(() => {
   const roundCount = Math.max(1, Number(teamForm.value.roundCount || 1))
@@ -302,6 +328,10 @@ const roundLineupSummaryList = computed(() => {
         const memberNames = eventRows.map((item) => getUserLabel(item.user_id)).filter(Boolean)
         return {
           key: [roundNo, groupNo, eventCode, eventNo].join('::'),
+          eventCode,
+          eventNo,
+          label,
+          memberNames,
           text: `${label}：${memberNames.join('+') || '-'}`,
         }
       })
@@ -415,6 +445,11 @@ const getRoundScoreSummary = (roundNo) =>
   roundScoreSummaryList.value.find((item) => Number(item.roundNo) === Number(roundNo))
 const getGroupScoreSummary = (roundNo, groupNo) =>
   getRoundScoreSummary(roundNo)?.groups?.find((item) => Number(item.groupNo) === Number(groupNo))
+const getEventScoreSummary = (roundNo, groupNo, eventCode, eventNo) =>
+  getGroupScoreSummary(roundNo, groupNo)?.events?.find(
+    (item) =>
+      String(item.eventCode) === String(eventCode) && Number(item.eventNo) === Number(eventNo)
+  )
 const liveRankingList = computed(() => {
   const rankMap = new Map()
   ;(roundScoreSummaryList.value || []).forEach((round) => {
@@ -1345,13 +1380,30 @@ onMounted(async () => {
   <section v-loading.fullscreen.lock="pageLoading" class="detail-page">
     <el-card class="overview-card" shadow="never">
       <template #header>
-        <div class="title">{{ detail?.name || '赛事详情' }}</div>
+        <div class="overview-header">
+          <div class="title">{{ detail?.name || '赛事详情' }}</div>
+          <span class="status-chip" :class="statusMeta.className">{{ statusMeta.label }}</span>
+        </div>
       </template>
-      <div class="meta">对局方式：{{ modeLabel }}</div>
-      <div class="meta">状态：{{ detail?.status || 'draft' }}</div>
-      <div class="meta">赛事阶段：{{ stageLabelMap[currentStage] || currentStage }}</div>
-      <div v-if="showParticipantSummary" class="meta">
-        参赛人数：{{ detail?.participant_count || 0 }}（男 {{ maleCount }} / 女 {{ femaleCount }}）
+      <div class="overview-chips">
+        <span class="info-chip">{{ modeLabel }}</span>
+        <span class="info-chip info-chip--stage">
+          {{ stageLabelMap[currentStage] || currentStage }}
+        </span>
+      </div>
+      <div v-if="showParticipantSummary" class="stat-grid">
+        <div class="stat-item stat-item--total">
+          <strong>{{ detail?.participant_count || 0 }}</strong>
+          <span>参赛人数</span>
+        </div>
+        <div class="stat-item stat-item--male">
+          <strong>{{ maleCount }}</strong>
+          <span>男生</span>
+        </div>
+        <div class="stat-item stat-item--female">
+          <strong>{{ femaleCount }}</strong>
+          <span>女生</span>
+        </div>
       </div>
       <div v-if="showParticipant" class="summary-block">
         <div class="summary-title">已报名人员</div>
@@ -1368,26 +1420,95 @@ onMounted(async () => {
         </div>
       </div>
       <div v-if="showTeamConfigSummary" class="summary-block">
-        <div class="summary-title">团体赛参数</div>
-        <div class="meta">{{ teamConfigSummaryText }}</div>
+        <div class="summary-title-row summary-title-row--section">
+          <div class="summary-title">团体赛参数</div>
+          <span class="config-mode-badge">
+            {{ teamForm.scheduleMode === 'per_round' ? '每轮单独配置' : '所有轮次相同' }}
+          </span>
+        </div>
+        <div class="config-stat-grid">
+          <div class="config-stat">
+            <span>分组</span>
+            <strong>{{ teamForm.groupCount }} 组</strong>
+          </div>
+          <div class="config-stat">
+            <span>轮数</span>
+            <strong>{{ teamForm.roundCount }} 轮</strong>
+          </div>
+          <div class="config-stat">
+            <span>分值</span>
+            <strong>{{ teamForm.scoreTarget }} 分</strong>
+          </div>
+        </div>
+        <div class="round-config-list">
+          <div v-for="round in teamConfigRoundList" :key="round.roundNo" class="round-config-row">
+            <span class="round-label">{{ round.label }}</span>
+            <div class="event-tags">
+              <span
+                v-for="event in round.events"
+                :key="`${round.roundNo}-${event.eventCode}-${event.eventNo}`"
+                class="event-tag"
+              >
+                {{ event.label }}
+              </span>
+              <span v-if="!round.events.length" class="event-tag event-tag--empty">未配置</span>
+            </div>
+          </div>
+        </div>
       </div>
       <div v-if="showGroupSummary" class="summary-block">
         <div class="summary-title">分组成员</div>
-        <div v-for="item in groupSummaryList" :key="item.groupNo" class="meta">
-          第 {{ item.groupNo }} 组：{{ item.memberNames.join('、') || '未分配' }}
+        <div class="group-summary-list">
+          <div v-for="item in groupSummaryList" :key="item.groupNo" class="group-summary-card">
+            <div class="group-summary-header">
+              <strong>第 {{ item.groupNo }} 组</strong>
+              <span>{{ item.members.length }} 人 · 男 {{ item.maleCount }} / 女 {{ item.femaleCount }}</span>
+            </div>
+            <div v-if="item.members.length" class="member-tags">
+              <span
+                v-for="member in item.members"
+                :key="member.id"
+                class="member-tag"
+                :class="{
+                  'member-tag--male': member.gender === 1,
+                  'member-tag--female': member.gender === 2,
+                }"
+              >
+                {{ member.name }}
+              </span>
+            </div>
+            <div v-else class="empty-members">暂未分配成员</div>
+          </div>
         </div>
       </div>
       <div v-if="showLiveRanking" class="summary-block">
-        <div class="summary-title">实时排名</div>
+        <div class="summary-title-row ranking-title-row">
+          <div class="summary-title">实时排名</div>
+          <span class="ranking-tip">积分优先 · 净胜分次之</span>
+        </div>
         <div class="ranking-list">
-          <div v-for="(item, index) in liveRankingList" :key="item.groupNo" class="ranking-item">
+          <div
+            v-for="(item, index) in liveRankingList"
+            :key="item.groupNo"
+            class="ranking-item"
+            :class="{ 'ranking-item--champion': index === 0 }"
+          >
             <div class="ranking-left">
-              <span class="ranking-index">{{ index + 1 }}</span>
-              <span class="ranking-name">{{ item.groupName }}</span>
+              <span class="ranking-index">
+                <el-icon v-if="index === 0"><Trophy /></el-icon>
+                <template v-else>{{ index + 1 }}</template>
+              </span>
+              <div class="ranking-team">
+                <span v-if="index === 0" class="champion-label">领先</span>
+                <span class="ranking-name">{{ item.groupName }}</span>
+              </div>
             </div>
             <div class="ranking-right">
-              <span>总积分 {{ item.totalWinPoints }}</span>
-              <span>净胜分 {{ item.totalNetScore }}</span>
+              <div class="ranking-points">
+                <strong>{{ item.totalWinPoints }}</strong>
+                <span>总积分</span>
+              </div>
+              <span class="ranking-net-score">净胜分 {{ item.totalNetScore }}</span>
             </div>
           </div>
         </div>
@@ -1409,9 +1530,11 @@ onMounted(async () => {
             :key="round.roundNo"
             class="lineup-summary-round"
           >
-            <div class="lineup-summary-round-title">第 {{ round.roundNo }} 轮</div>
-            <div class="meta">
-              本轮已计分对局：{{ getRoundScoreSummary(round.roundNo)?.roundScoredMatches || 0 }}
+            <div class="lineup-summary-round-header">
+              <div class="lineup-summary-round-title">第 {{ round.roundNo }} 轮</div>
+              <span class="round-scored-count">
+                已计分 {{ getRoundScoreSummary(round.roundNo)?.roundScoredMatches || 0 }} 场
+              </span>
             </div>
             <div class="lineup-summary-group-grid">
               <div
@@ -1419,24 +1542,53 @@ onMounted(async () => {
                 :key="`${round.roundNo}-${group.groupNo}`"
                 class="lineup-summary-group"
               >
-                <div class="lineup-summary-group-title">{{ group.groupName }}</div>
-                <div v-for="row in group.rows" :key="row.key" class="meta">{{ row.text }}</div>
-                <div class="group-score-summary">
-                  <div class="meta">
-                    组内总得分：{{
-                      getGroupScoreSummary(round.roundNo, group.groupNo)?.totalWinPoints || 0
-                    }}， 组内总净胜分：{{
-                      getGroupScoreSummary(round.roundNo, group.groupNo)?.totalNetScore || 0
-                    }}
+                <div class="lineup-summary-group-header">
+                  <div class="lineup-summary-group-title">{{ group.groupName }}</div>
+                  <div class="group-score-overview">
+                    <div>
+                      <strong>{{
+                        getGroupScoreSummary(round.roundNo, group.groupNo)?.totalWinPoints || 0
+                      }}</strong>
+                      <span>总得分</span>
+                    </div>
+                    <div class="group-net-score">
+                      <strong>{{
+                        getGroupScoreSummary(round.roundNo, group.groupNo)?.totalNetScore || 0
+                      }}</strong>
+                      <span>净胜分</span>
+                    </div>
                   </div>
-                  <div
-                    v-for="event in getGroupScoreSummary(round.roundNo, group.groupNo)?.events ||
-                    []"
-                    :key="`${round.roundNo}-${group.groupNo}-${event.eventCode}-${event.eventNo}`"
-                    class="meta"
-                  >
-                    {{ event.eventLabel }}：得分 {{ event.winPoints }}，总分
-                    {{ event.totalScore }}，净胜分 {{ event.netScore }}
+                </div>
+                <div class="lineup-event-list">
+                  <div v-for="row in group.rows" :key="row.key" class="lineup-event-row">
+                    <div class="lineup-event-info">
+                      <span class="lineup-event-name">{{ row.label }}</span>
+                      <span class="lineup-event-members">
+                        {{ row.memberNames.join(' · ') || '暂未安排' }}
+                      </span>
+                    </div>
+                    <div class="lineup-event-score">
+                      <strong>{{
+                        getEventScoreSummary(
+                          round.roundNo,
+                          group.groupNo,
+                          row.eventCode,
+                          row.eventNo
+                        )?.winPoints || 0
+                      }}</strong>
+                      <span>得分</span>
+                      <small>
+                        净胜
+                        {{
+                          getEventScoreSummary(
+                            round.roundNo,
+                            group.groupNo,
+                            row.eventCode,
+                            row.eventNo
+                          )?.netScore || 0
+                        }}
+                      </small>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1447,11 +1599,15 @@ onMounted(async () => {
 
       <div
         v-if="currentStage === 'rounds_in_progress' || currentStage === 'finished'"
-        class="summary-block"
+        class="round-progress"
       >
-        <div class="meta">当前轮次：{{ currentRoundNo || '-' }}</div>
-        <div class="meta">
-          轮次状态：{{ roundStateLabelMap[currentRoundState] || currentRoundState }}
+        <div class="round-progress-index">
+          <span>当前轮次</span>
+          <strong>第 {{ currentRoundNo || '-' }} 轮</strong>
+        </div>
+        <div class="round-progress-state">
+          <span class="progress-dot"></span>
+          {{ roundStateLabelMap[currentRoundState] || currentRoundState }}
         </div>
       </div>
     </el-card>
@@ -1568,8 +1724,116 @@ onMounted(async () => {
 }
 
 .title {
+  min-width: 0;
+  color: #252b3a;
   font-size: 19px;
   font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.overview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-chip,
+.info-chip,
+.config-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-chip {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 10px;
+}
+
+.status-chip.is-draft {
+  color: #8a6508;
+  background: #fff6d8;
+}
+
+.status-chip.is-running {
+  color: #237852;
+  background: #e9f8f0;
+}
+
+.status-chip.is-finished {
+  color: #667085;
+  background: #eef1f6;
+}
+
+.overview-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.info-chip {
+  min-height: 27px;
+  padding: 0 11px;
+  color: #4b63d6;
+  background: #edf1ff;
+}
+
+.info-chip--stage {
+  color: #7354ad;
+  background: #f3edff;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.stat-item {
+  display: flex;
+  min-width: 0;
+  min-height: 72px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 3px;
+  border-radius: 14px;
+  background: #f6f7fc;
+}
+
+.stat-item strong {
+  color: #30384a;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.stat-item span {
+  color: #818a9d;
+  font-size: 11px;
+}
+
+.stat-item--male {
+  background: #eef6ff;
+}
+
+.stat-item--male strong {
+  color: #3987da;
+}
+
+.stat-item--female {
+  background: #fff1f6;
+}
+
+.stat-item--female strong {
+  color: #e56d9b;
 }
 
 .meta {
@@ -1579,18 +1843,18 @@ onMounted(async () => {
 }
 
 .summary-block {
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid rgba(120, 134, 161, 0.12);
-  border-radius: 13px;
-  background: #f8f9fd;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(120, 134, 161, 0.13);
+  border-radius: 16px;
+  background: linear-gradient(145deg, #fafbfe, #f6f8fd);
 }
 
 .summary-title {
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #303133;
+  margin-bottom: 10px;
+  color: #30384a;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .summary-title-row {
@@ -1600,6 +1864,194 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.summary-title-row--section {
+  align-items: flex-start;
+  margin-bottom: 11px;
+}
+
+.summary-title-row--section .summary-title {
+  margin-bottom: 0;
+}
+
+.config-mode-badge {
+  min-height: 24px;
+  padding: 0 9px;
+  color: #5c6fd7;
+  background: #eaf0ff;
+}
+
+.config-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.config-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(120, 134, 161, 0.1);
+}
+
+.config-stat span {
+  color: #929aab;
+  font-size: 10px;
+}
+
+.config-stat strong {
+  color: #394155;
+  font-size: 13px;
+}
+
+.round-config-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.round-config-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.round-label {
+  padding-top: 4px;
+  color: #687187;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.event-tags,
+.member-tags {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.event-tag,
+.member-tag {
+  display: inline-flex;
+  min-height: 25px;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 8px;
+  color: #536078;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(120, 134, 161, 0.13);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.event-tag {
+  color: #5067d8;
+  background: #f1f4ff;
+  box-shadow: inset 0 0 0 1px rgba(79, 109, 245, 0.12);
+}
+
+.event-tag--empty,
+.empty-members {
+  color: #a0a7b6;
+}
+
+.group-summary-list {
+  display: grid;
+  gap: 9px;
+}
+
+.group-summary-card {
+  padding: 11px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(120, 134, 161, 0.11);
+}
+
+.group-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.group-summary-header strong {
+  color: #3e4659;
+  font-size: 13px;
+}
+
+.group-summary-header span {
+  color: #9299a9;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.member-tag--male {
+  color: #337fce;
+  background: #eef6ff;
+  box-shadow: inset 0 0 0 1px rgba(64, 158, 255, 0.16);
+}
+
+.member-tag--female {
+  color: #d95d8c;
+  background: #fff1f6;
+  box-shadow: inset 0 0 0 1px rgba(245, 108, 157, 0.16);
+}
+
+.empty-members {
+  font-size: 11px;
+}
+
+.round-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 13px 14px;
+  border-radius: 15px;
+  background: linear-gradient(135deg, #eef2ff, #f5f1ff);
+}
+
+.round-progress-index {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.round-progress-index span {
+  color: #7d869b;
+  font-size: 10px;
+}
+
+.round-progress-index strong {
+  color: #4359c8;
+  font-size: 15px;
+}
+
+.round-progress-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #5f6880;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.progress-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5b75ee;
+  box-shadow: 0 0 0 4px rgba(91, 117, 238, 0.12);
+}
+
 .summary-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1607,51 +2059,225 @@ onMounted(async () => {
 }
 
 .lineup-summary-round + .lineup-summary-round {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #ebeef5;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(120, 134, 161, 0.12);
 }
 
-.lineup-summary-round-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 8px;
-}
-
-.lineup-summary-group-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.lineup-summary-group {
-  border: 1px dashed #dcdfe6;
-  border-radius: 8px;
-  padding: 8px;
-}
-
-.group-score-summary {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed #ebeef5;
-  display: grid;
-  gap: 4px;
-}
-
-.ranking-list {
-  display: grid;
-  gap: 8px;
-}
-
-.ranking-item {
+.lineup-summary-round-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px;
-  border: 1px dashed #dcdfe6;
-  border-radius: 8px;
+  margin: 8px 0 10px;
+}
+
+.lineup-summary-round-title {
+  color: #343c4f;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.round-scored-count {
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #66708a;
+  background: #edf0f7;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.lineup-summary-group-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.lineup-summary-group {
+  overflow: hidden;
+  border: 1px solid rgba(120, 134, 161, 0.13);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.lineup-summary-group-header {
+  display: flex;
+  min-height: 62px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #f5f7ff, #faf9ff);
+}
+
+.lineup-summary-group-title {
+  color: #343c4f;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.group-score-overview {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.group-score-overview > div {
+  display: flex;
+  min-width: 54px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(79, 109, 245, 0.1);
+}
+
+.group-score-overview strong {
+  color: #4f65d6;
+  font-size: 17px;
+  line-height: 1.05;
+}
+
+.group-score-overview span {
+  margin-top: 2px;
+  color: #8a93a6;
+  font-size: 9px;
+}
+
+.group-score-overview .group-net-score {
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(120, 134, 161, 0.09);
+}
+
+.group-score-overview .group-net-score strong {
+  color: #778196;
+  font-size: 14px;
+}
+
+.lineup-event-list {
+  display: grid;
+  padding: 0 12px;
+}
+
+.lineup-event-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(120, 134, 161, 0.1);
+}
+
+.lineup-event-row:last-child {
+  border-bottom: 0;
+}
+
+.lineup-event-info {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lineup-event-name {
+  color: #44516c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lineup-event-members {
+  overflow: hidden;
+  color: #7b8498;
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineup-event-score {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  column-gap: 4px;
+  min-width: 74px;
+  text-align: right;
+}
+
+.lineup-event-score strong {
+  color: #5066d6;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.lineup-event-score > span {
+  color: #7f889b;
+  font-size: 10px;
+}
+
+.lineup-event-score small {
+  grid-column: 1 / -1;
+  margin-top: 3px;
+  color: #9aa1af;
+  font-size: 9px;
+}
+
+.ranking-list {
+  display: grid;
+  gap: 9px;
+}
+
+.ranking-title-row {
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.ranking-title-row .summary-title {
+  margin-bottom: 0;
+}
+
+.ranking-tip {
+  color: #9aa1b0;
+  font-size: 9px;
+}
+
+.ranking-item {
+  position: relative;
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  overflow: hidden;
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 134, 161, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.ranking-item--champion {
+  min-height: 80px;
+  padding: 12px 14px;
+  border-color: rgba(224, 170, 60, 0.3);
+  background:
+    radial-gradient(circle at 92% 12%, rgba(255, 222, 132, 0.42), transparent 32%),
+    linear-gradient(135deg, #fffaf0, #fff6d9);
+  box-shadow: 0 10px 24px rgba(190, 137, 33, 0.12);
+}
+
+.ranking-item--champion::after {
+  position: absolute;
+  top: -28px;
+  right: -24px;
+  width: 82px;
+  height: 82px;
+  content: '';
+  border: 18px solid rgba(255, 194, 68, 0.1);
+  border-radius: 50%;
 }
 
 .ranking-left {
@@ -1662,36 +2288,94 @@ onMounted(async () => {
 }
 
 .ranking-index {
-  width: 22px;
-  height: 22px;
-  border-radius: 11px;
+  position: relative;
+  z-index: 1;
   display: inline-flex;
+  width: 30px;
+  height: 30px;
   align-items: center;
   justify-content: center;
+  border-radius: 50%;
   font-size: 12px;
   color: #fff;
-  background: #409eff;
+  background: linear-gradient(135deg, #7186ef, #4f6df5);
+  box-shadow: 0 5px 12px rgba(79, 109, 245, 0.2);
+}
+
+.ranking-item--champion .ranking-index {
+  width: 38px;
+  height: 38px;
+  color: #fff;
+  font-size: 19px;
+  background: linear-gradient(145deg, #f6c75d, #e9a72c);
+  box-shadow: 0 7px 16px rgba(211, 151, 33, 0.28);
+}
+
+.ranking-team {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.champion-label {
+  color: #ba7a0c;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .ranking-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #303133;
+  overflow: hidden;
+  color: #30384a;
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ranking-item--champion .ranking-name {
+  color: #69470e;
+  font-size: 15px;
 }
 
 .ranking-right {
+  position: relative;
+  z-index: 1;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  font-size: 12px;
-  color: #606266;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
 }
 
-.lineup-summary-group-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #303133;
+.ranking-points {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.ranking-points strong {
+  color: #4d63d8;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.ranking-points span {
+  color: #798296;
+  font-size: 9px;
+}
+
+.ranking-item--champion .ranking-points strong {
+  color: #c48412;
+  font-size: 29px;
+}
+
+.ranking-net-score {
+  min-width: 58px;
+  color: #969dab;
+  font-size: 10px;
+  text-align: right;
 }
 
 .action-row {

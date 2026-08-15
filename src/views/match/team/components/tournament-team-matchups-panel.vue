@@ -15,10 +15,13 @@
         <div class="matchup-title">{{ item.eventLabel }}</div>
         <div class="event-list">
           <div v-for="match in item.matches || []" :key="match.key" class="event-item">
-            <div class="event-row" :class="{
-              'event-row--home-winner': getWinnerSide(match.key) === 'home',
-              'event-row--away-winner': getWinnerSide(match.key) === 'away',
-            }">
+            <div
+              class="event-row"
+              :class="{
+                'event-row--home-winner': getWinnerSide(match.key) === 'home',
+                'event-row--away-winner': getWinnerSide(match.key) === 'away',
+              }"
+            >
               <div class="event-group" :class="{ 'event-group--winner': getWinnerSide(match.key) === 'home' }">
                 {{ match.homeLabel }}
                 <el-tag v-if="getWinnerSide(match.key) === 'home'" size="small" type="success" effect="plain">胜</el-tag>
@@ -35,8 +38,10 @@
                   {{ getScoreValue(match.key, 'awayScore') ?? '-' }}
                 </span>
               </div>
-              <div class="event-side event-side-end"
-                :class="{ 'event-side--winner': getWinnerSide(match.key) === 'away' }">
+              <div
+                class="event-side event-side-end"
+                :class="{ 'event-side--winner': getWinnerSide(match.key) === 'away' }"
+              >
                 {{ match.awayValue }}</div>
               <div class="event-group" :class="{ 'event-group--winner': getWinnerSide(match.key) === 'away' }">
                 {{ match.awayLabel }}
@@ -86,8 +91,12 @@
         </div>
       </div>
       <div class="quick-row">
-        <el-button v-for="item in quickScoreOptions" :key="item.label" size="small"
-          @click="applyQuickScore(item.home, item.away)">
+        <el-button
+          v-for="item in quickScoreOptions"
+          :key="item.label"
+          size="small"
+          @click="applyQuickScore(item.home, item.away)"
+        >
           {{ item.label }}
         </el-button>
         <el-button size="small" type="success" plain @click="applyQuickWinner('home')">主队胜</el-button>
@@ -240,7 +249,10 @@ const submitScore = () => {
 }
 
 .event-item {
-  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 4px;
 }
 
 .event-row {
@@ -250,7 +262,6 @@ const submitScore = () => {
   align-items: center;
   border-radius: 8px;
   padding: 6px 8px;
-  margin-right: 14px;
 }
 
 .event-row--home-winner {
@@ -318,14 +329,23 @@ const submitScore = () => {
 }
 
 .event-action {
-  position: absolute;
-  right: -10px;
-  bottom: 14px;
+  display: flex;
+  width: 30px;
+  height: 100%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
 }
 
 .action-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
   font-size: 18px;
   color: #409eff;
+  cursor: pointer;
 }
 
 .dialog-meta {
